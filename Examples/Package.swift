@@ -31,6 +31,10 @@ let package = Package(
     platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13), .macCatalyst(.v13), .visionOS(.v1)],
     dependencies: [
         .package(name: "swift-cross-ui", path: ".."),
+        .package(
+            url: "https://github.com/pointfreeco/swift-perception.git",
+            from: "2.0.10"
+        ),
     ] + hotReloadingDependencies,
     targets: [
         .executableTarget(
@@ -98,6 +102,11 @@ let package = Package(
         .executableTarget(
             name: "ColorsExample",
             dependencies: exampleDependencies
-        )
+        ),
+        .executableTarget(
+            name: "ObservableExample",
+            dependencies: exampleDependencies
+                + [.product(name: "Perception", package: "swift-perception")]
+        ),
     ]
 )

@@ -1,5 +1,5 @@
 {
-  "originHash" : "7da0e69413af5876ec55104e5d404991c3e61577f3a1dc7df944eabe83dd5705",
+  "originHash" : "8621a2798089ed1fe4fc9a6ef1f8e03b2ec90cc3599637d47b24f0b5af28031d",
   "pins" : [
     {
       "identity" : "aexml",
@@ -277,6 +277,15 @@
       "state" : {
         "revision" : "3432cb81164dd3d69a75d0d63205be5fbae2c34b",
         "version" : "0.14.1"
+      }
+    },
+    {
+      "identity" : "swift-perception",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pointfreeco/swift-perception.git",
+      "state" : {
+        "revision" : "25ac73741c3436605d61eceb5207e896973918e7",
+        "version" : "2.0.10"
       }
     },
     {

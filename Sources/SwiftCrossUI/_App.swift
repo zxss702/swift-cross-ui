@@ -1,3 +1,6 @@
+import Foundation
+import PerceptionCore
+
 // TODO: This could possibly be renamed to ``SceneGraph`` now that that's basically the role
 //   it has taken on since introducing scenes.
 /// A top-level wrapper providing an entry point for the app. Exists to be able to persist
@@ -17,6 +20,10 @@ class _App<AppRoot: App> {
     var environment: EnvironmentValues
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
+    
+    /// Stores the ID of the current call to `withPerceptionTracking()`. Helps preventing
+    /// duplicate view updates.
+    private var currentPerceptionTrackingID: UUID?
 
     /// Wraps a user's app implementation.
     init(_ app: AppRoot) {
@@ -35,7 +42,19 @@ class _App<AppRoot: App> {
         dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
         if let sceneGraphRoot {
-            let result = sceneGraphRoot.updateNode(app.body, environment: environment)
+            var body: AppRoot.Body!
+            let perceptionTrackingID = UUID()
+            self.currentPerceptionTrackingID = perceptionTrackingID
+            withPerceptionTracking {
+                body = app.body
+            } onChange: { [backend, weak self] in
+                backend.runInMainThread {
+                    guard self?.currentPerceptionTrackingID == perceptionTrackingID else { return }
+                    self?.refreshSceneGraph()
+                }
+            }
+
+            let result = sceneGraphRoot.updateNode(body, environment: environment)
             backend.setApplicationMenu(
                 result.preferences.commands.resolve(),
                 environment: environment
@@ -80,8 +99,19 @@ class _App<AppRoot: App> {
                 cancellables.append(cancellable)
             }
 
+            var body: AppRoot.Body!
+            let perceptionTrackingID = UUID()
+            self.currentPerceptionTrackingID = perceptionTrackingID
+            withPerceptionTracking {
+                body = app.body
+            } onChange: { [backend, weak self] in
+                backend.runInMainThread {
+                    guard self?.currentPerceptionTrackingID == perceptionTrackingID else { return }
+                    self?.refreshSceneGraph()
+                }
+            }
             let rootNode = AppRoot.Body.Node(
-                from: app.body,
+                from: body,
                 backend: backend,
                 environment: environment
             )
