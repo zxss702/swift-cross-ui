@@ -1,4 +1,5 @@
 import Foundation
+import PerceptionCore
 
 /// A view graph node storing a view, its widget, and its children (likely a
 /// collection of more nodes).
@@ -59,6 +60,10 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: Sendable {
 
     /// The dynamic property updater for this view.
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
+    
+    /// Stores the ID of the current call to `withPerceptionTracking()`. Helps preventing
+    /// duplicate view updates.
+    private var currentPerceptionTrackingID: UUID?
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -92,11 +97,21 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: Sendable {
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: nil)
 
-        let children = view.children(
-            backend: backend,
-            snapshots: childSnapshots,
-            environment: viewEnvironment
-        )
+        var children: (any ViewGraphNodeChildren)!
+        let perceptionTrackingID = UUID()
+        self.currentPerceptionTrackingID = perceptionTrackingID
+        withPerceptionTracking {
+            children = view.children(
+                backend: backend,
+                snapshots: childSnapshots,
+                environment: viewEnvironment
+            )
+        } onChange: { [weak self] in
+            backend.runInMainThread {
+                guard self?.currentPerceptionTrackingID == perceptionTrackingID else { return }
+                self?.bottomUpUpdate()
+            }
+        }
         self.children = children
 
         // Then create the widget for the view itself
@@ -229,14 +244,24 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: Sendable {
         let viewEnvironment = updateEnvironment(environment)
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
-
-        let result = view.computeLayout(
-            widget,
-            children: children,
-            proposedSize: proposedSize,
-            environment: viewEnvironment,
-            backend: backend
-        )
+        
+        var result: ViewLayoutResult!
+        let perceptionTrackingID = UUID()
+        self.currentPerceptionTrackingID = perceptionTrackingID
+        withPerceptionTracking {
+            result = view.computeLayout(
+                widget,
+                children: children,
+                proposedSize: proposedSize,
+                environment: viewEnvironment,
+                backend: backend
+            )
+        } onChange: { [backend, weak self] in
+            backend.runInMainThread {
+                guard self?.currentPerceptionTrackingID == perceptionTrackingID else { return }
+                self?.bottomUpUpdate()
+            }
+        }
 
         // We assume that the view's sizing behaviour won't change between consecutive
         // layout computations and the following commit, because groups of updates
