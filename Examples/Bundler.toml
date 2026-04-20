@@ -93,3 +93,8 @@ identifier = 'dev.swiftcrossui.MusicPlayerExample'
 product = 'MusicPlayerExample'
 version = '0.1.0'
 icon = 'Icons/MusicPlayerExample.png'
+
+[apps.ObservableExample]
+identifier = 'dev.swiftcrossui.ObservableExample'
+product = 'ObservableExample'
+version = '0.1.0'
