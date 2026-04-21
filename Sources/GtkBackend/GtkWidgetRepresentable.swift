@@ -187,7 +187,7 @@ extension GtkWidgetRepresentable where Coordinator == Void {
 @MainActor
 final class RepresentingWidget<Representable: GtkWidgetRepresentable>: Gtk.Fixed {
     var representable: Representable
-    var context: Representable.Context?
+    nonisolated(unsafe) var context: Representable.Context?
     var savedSizeRequest: SIMD2<Int>?
 
     init(representable: Representable) {
@@ -195,7 +195,7 @@ final class RepresentingWidget<Representable: GtkWidgetRepresentable>: Gtk.Fixed
         super.init()
     }
 
-    var child: Representable.GtkWidgetType?
+    nonisolated(unsafe) var child: Representable.GtkWidgetType?
 
     func update(with environment: EnvironmentValues) {
         if var context, let child {
@@ -216,6 +216,8 @@ final class RepresentingWidget<Representable: GtkWidgetRepresentable>: Gtk.Fixed
     }
 
     deinit {
+        let context = context
+        let child = child
         MainActor.assumeIsolated {
             if let context, let child {
                 Representable.dismantleGtkWidget(

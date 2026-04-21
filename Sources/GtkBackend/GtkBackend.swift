@@ -436,8 +436,8 @@ public final class GtkBackend: AppBackend {
         }
     }
 
-    class ThreadActionContext {
-        var action: @MainActor @Sendable () -> Void
+    final class ThreadActionContext: @unchecked Sendable {
+        let action: @MainActor @Sendable () -> Void
 
         init(action: @escaping @MainActor @Sendable () -> Void) {
             self.action = action
@@ -453,9 +453,9 @@ public final class GtkBackend: AppBackend {
                     fatalError("Gtk action callback called without context")
                 }
 
+                let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
+                    .takeUnretainedValue()
                 MainActor.assumeIsolated {
-                    let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
-                        .takeUnretainedValue()
                     action.action()
                 }
 
@@ -479,9 +479,9 @@ public final class GtkBackend: AppBackend {
                     fatalError("Gtk action callback called without context")
                 }
 
+                let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
+                    .takeUnretainedValue()
                 MainActor.assumeIsolated {
-                    let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
-                        .takeUnretainedValue()
                     action.action()
                 }
 

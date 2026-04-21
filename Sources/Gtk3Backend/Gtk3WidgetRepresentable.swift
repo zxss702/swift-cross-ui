@@ -188,7 +188,7 @@ extension Gtk3WidgetRepresentable where Coordinator == Void {
 @MainActor
 final class RepresentingWidget<Representable: Gtk3WidgetRepresentable>: Gtk3.Fixed {
     var representable: Representable
-    var context: Representable.Context?
+    nonisolated(unsafe) var context: Representable.Context?
     var savedSizeRequest: SIMD2<Int>?
 
     init(representable: Representable) {
@@ -196,7 +196,7 @@ final class RepresentingWidget<Representable: Gtk3WidgetRepresentable>: Gtk3.Fix
         super.init()
     }
 
-    var child: Representable.Gtk3WidgetType?
+    nonisolated(unsafe) var child: Representable.Gtk3WidgetType?
 
     func update(with environment: EnvironmentValues) {
         if var context, let child {
@@ -218,8 +218,15 @@ final class RepresentingWidget<Representable: Gtk3WidgetRepresentable>: Gtk3.Fix
     }
 
     deinit {
-        if let context, let child {
-            Representable.dismantleGtk3Widget(child, coordinator: context.coordinator)
+        let context = context
+        let child = child
+        MainActor.assumeIsolated {
+            if let context, let child {
+                Representable.dismantleGtk3Widget(
+                    child,
+                    coordinator: context.coordinator
+                )
+            }
         }
     }
 }

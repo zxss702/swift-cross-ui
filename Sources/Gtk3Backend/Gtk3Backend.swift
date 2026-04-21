@@ -468,10 +468,10 @@ public final class Gtk3Backend: AppBackend {
         }
     }
 
-    class ThreadActionContext {
-        var action: @MainActor () -> Void
+    final class ThreadActionContext: @unchecked Sendable {
+        let action: @MainActor @Sendable () -> Void
 
-        init(action: @escaping @MainActor () -> Void) {
+        init(action: @escaping @MainActor @Sendable () -> Void) {
             self.action = action
         }
     }
@@ -485,9 +485,9 @@ public final class Gtk3Backend: AppBackend {
                     fatalError("Gtk action callback called without context")
                 }
 
+                let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
+                    .takeUnretainedValue()
                 MainActor.assumeIsolated {
-                    let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
-                        .takeUnretainedValue()
                     action.action()
                 }
 
@@ -500,7 +500,7 @@ public final class Gtk3Backend: AppBackend {
 
     private static func runInMainThread(
         afterMilliseconds delay: Int,
-        action: @escaping () -> Void
+        action: @escaping @MainActor @Sendable () -> Void
     ) {
         let action = ThreadActionContext(action: action)
         g_timeout_add_full(
@@ -511,9 +511,9 @@ public final class Gtk3Backend: AppBackend {
                     fatalError("Gtk action callback called without context")
                 }
 
+                let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
+                    .takeUnretainedValue()
                 MainActor.assumeIsolated {
-                    let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
-                        .takeUnretainedValue()
                     action.action()
                 }
 
