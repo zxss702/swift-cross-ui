@@ -216,8 +216,13 @@ final class RepresentingWidget<Representable: GtkWidgetRepresentable>: Gtk.Fixed
     }
 
     deinit {
-        if let context, let child {
-            Representable.dismantleGtkWidget(child, coordinator: context.coordinator)
+        MainActor.assumeIsolated {
+            if let context, let child {
+                Representable.dismantleGtkWidget(
+                    child,
+                    coordinator: context.coordinator
+                )
+            }
         }
     }
 }

@@ -437,9 +437,9 @@ public final class GtkBackend: AppBackend {
     }
 
     class ThreadActionContext {
-        var action: @MainActor () -> Void
+        var action: @MainActor @Sendable () -> Void
 
-        init(action: @escaping @MainActor () -> Void) {
+        init(action: @escaping @MainActor @Sendable () -> Void) {
             self.action = action
         }
     }
@@ -468,7 +468,7 @@ public final class GtkBackend: AppBackend {
 
     private static func runInMainThread(
         afterMilliseconds delay: Int,
-        action: @escaping () -> Void
+        action: @escaping @MainActor @Sendable () -> Void
     ) {
         let action = ThreadActionContext(action: action)
         g_timeout_add_full(
