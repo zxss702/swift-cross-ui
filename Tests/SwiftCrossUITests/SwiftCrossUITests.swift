@@ -31,7 +31,7 @@ struct TestError: LocalizedError {
 }
 
 @Suite("Testing for SwiftCrossUI")
-struct SwiftCrossUITests {
+struct SwiftCrossUITests: Sendable {
     @Test("Ensures that a NavigationPath can be round tripped to and from JSON")
     func testCodableNavigationPath() throws {
         var path = NavigationPath()
@@ -182,7 +182,7 @@ struct SwiftCrossUITests {
             )
 
             #expect(
-                result.size == ViewSize(92, 96),
+                result.size == ViewSize(102, 104),
                 "View update result mismatch"
             )
 

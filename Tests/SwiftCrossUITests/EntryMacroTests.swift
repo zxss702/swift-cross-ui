@@ -9,7 +9,7 @@ fileprivate let testMacros: [String: MacroSpec] = [
 ]
 
 @Suite("Testing @Entry Macro")
-struct EntryMacroTests {
+struct EntryMacroTests: Sendable {
     @Test("Entry generates without type annotation")
     func testEntryGeneratesWithLiteral() {
         assertMacroExpansion(

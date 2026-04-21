@@ -4,17 +4,7 @@ import DummyBackend
 @testable import SwiftCrossUI
 
 @Suite("Testing for stack layouts")
-struct StackLayoutTests {
-    let backend: DummyBackend
-    let window: DummyBackend.Window
-    let environment: EnvironmentValues
-
-    @MainActor
-    init() {
-        backend = DummyBackend()
-        window = backend.createWindow(withDefaultSize: nil)
-        environment = EnvironmentValues(backend: backend).with(\.window, window)
-    }
+struct StackLayoutTests: Sendable {
 
     @MainActor
     @Test("Empty ScrollView should still be greedy in stack (#328)")
@@ -64,6 +54,7 @@ struct StackLayoutTests {
             Text(strings[1])
         }
 
+        let (_, _, environment) = makeContext()
         let lineHeight = environment.resolvedFont.lineHeight
 
         let textResults = strings.map(Text.init(_:)).map { computeLayout(of: $0) }
@@ -86,6 +77,7 @@ struct StackLayoutTests {
         of view: V,
         proposedSize: ProposedViewSize = .unspecified
     ) -> ViewLayoutResult {
+        let (backend, _, environment) = makeContext()
         let node = ViewGraphNode(for: view, backend: backend, environment: environment)
         return node.computeLayout(
             proposedSize: proposedSize,
@@ -98,9 +90,18 @@ struct StackLayoutTests {
         for view: V,
         proposedSize: ProposedViewSize = .unspecified
     ) -> ViewGraphNode<V, DummyBackend> {
+        let (backend, _, environment) = makeContext()
         let node = ViewGraphNode(for: view, backend: backend, environment: environment)
         _ = node.computeLayout(proposedSize: proposedSize, environment: environment)
         _ = node.commit()
         return node
+    }
+
+    @MainActor
+    func makeContext() -> (DummyBackend, DummyBackend.Window, EnvironmentValues) {
+        let backend = DummyBackend()
+        let window = backend.createWindow(withDefaultSize: nil)
+        let environment = EnvironmentValues(backend: backend).with(\.window, window)
+        return (backend, window, environment)
     }
 }

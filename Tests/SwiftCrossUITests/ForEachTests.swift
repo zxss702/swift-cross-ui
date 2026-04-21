@@ -4,7 +4,7 @@ import DummyBackend
 @testable import SwiftCrossUI
 
 @Suite("Testing for ForEach")
-struct ForEachTests {
+struct ForEachTests: Sendable {
     @MainActor
     @Test("Duplicate ids", .bug("https://github.com/moreSwift/swift-cross-ui/issues/456"))
     func duplicateIds() {

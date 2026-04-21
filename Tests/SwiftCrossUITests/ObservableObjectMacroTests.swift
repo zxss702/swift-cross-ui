@@ -9,7 +9,7 @@ fileprivate let testMacros: [String: MacroSpec] = [
 ]
 
 @Suite("Testing @ObservableObject Macro")
-struct ObservableTests {
+struct ObservableTests: Sendable {
     @Test("Stored property gets Published")
     func testStoredPropertyGetsAttribute() {
         assertMacroExpansion(

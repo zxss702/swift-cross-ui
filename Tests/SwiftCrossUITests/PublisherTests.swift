@@ -8,7 +8,7 @@ import Foundation
 #endif
 
 @Suite("Publisher-related tests")
-struct PublisherTests {
+struct PublisherTests: Sendable {
     @Test("Ensures that basic Publisher operations can be observed")
     func testPublisherObservation() {
         class NestedState: SwiftCrossUI.ObservableObject {
@@ -76,8 +76,8 @@ struct PublisherTests {
             actor Count {
                 var count = 0
 
-                func update(_ action: (Int) -> Int) {
-                    count = action(count)
+                func increment() {
+                    count += 1
                 }
             }
 
@@ -94,7 +94,7 @@ struct PublisherTests {
             let backend = await AppKitBackend()
             let cancellable = state.didChange.observeAsUIUpdater(backend: backend) {
                 Task {
-                    await updateCount.update { $0 + 1 }
+                    await updateCount.increment()
                 }
                 // Simulate an update of duration `updateDuration` seconds
                 Thread.sleep(forTimeInterval: updateDuration)
