@@ -43,7 +43,7 @@ public struct RoundedRectangle {
 }
 
 extension RoundedRectangle: Shape {
-    public func path(in bounds: Path.Rect) -> Path {
+    public nonisolated func path(in bounds: Path.Rect) -> Path {
         // just to avoid `RoundedRectangle.` qualifiers
         let rMin = RoundedRectangle.rMin
         let points = RoundedRectangle.points
@@ -469,7 +469,7 @@ extension RoundedRectangle: InsettableShape {
 extension RoundedRectangle.InsetShapeImpl: InsettableShape {
     private var actualCornerRadius: Double { max(0, initialCornerRadius - insetAmount) }
 
-    func path(in bounds: Path.Rect) -> Path {
+    nonisolated func path(in bounds: Path.Rect) -> Path {
         RoundedRectangle(cornerRadius: actualCornerRadius)
             .path(
                 in: .init(
@@ -481,7 +481,7 @@ extension RoundedRectangle.InsetShapeImpl: InsettableShape {
             )
     }
 
-    func size(fitting proposal: ProposedViewSize) -> ViewSize {
+    nonisolated func size(fitting proposal: ProposedViewSize) -> ViewSize {
         let proposedWidth = proposal.width ?? 10
         let proposedHeight = proposal.height ?? 10
 

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftCrossUI
 
+@MainActor
 public final class DummyBackend: AppBackend {
     public class Window {
         static let defaultSize = SIMD2<Int>(400, 200)
@@ -261,7 +262,7 @@ public final class DummyBackend: AppBackend {
     public var deviceClass = DeviceClass.desktop
     public var canRevealFiles = false
     public var supportsMultipleWindows = true
-    public var supportedDatePickerStyles: [DatePickerStyle] = []
+    public nonisolated let supportedDatePickerStyles: [DatePickerStyle] = []
     public var supportedPickerStyles: [BackendPickerStyle] = []
     public let canOverrideWindowColorScheme = true
 
@@ -343,7 +344,7 @@ public final class DummyBackend: AppBackend {
         window.closeHandler = action
     }
 
-    public func runInMainThread(action: @escaping @MainActor () -> Void) {
+    public nonisolated func runInMainThread(action: @escaping @MainActor () -> Void) {
         DispatchQueue.main.async {
             action()
         }

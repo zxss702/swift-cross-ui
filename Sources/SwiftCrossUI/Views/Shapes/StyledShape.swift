@@ -15,6 +15,7 @@ struct StyledShapeImpl<Base: Shape>: Sendable {
     var fillColor: Color?
     var strokeStyle: StrokeStyle?
 
+    @MainActor
     init(
         base: Base,
         strokeColor: Color? = nil,
@@ -36,11 +37,11 @@ struct StyledShapeImpl<Base: Shape>: Sendable {
 }
 
 extension StyledShapeImpl: StyledShape {
-    func path(in bounds: Path.Rect) -> Path {
+    nonisolated func path(in bounds: Path.Rect) -> Path {
         return base.path(in: bounds)
     }
 
-    func size(fitting proposal: ProposedViewSize) -> ViewSize {
+    nonisolated func size(fitting proposal: ProposedViewSize) -> ViewSize {
         return base.size(fitting: proposal)
     }
 }

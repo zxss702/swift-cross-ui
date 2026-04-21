@@ -179,6 +179,7 @@ extension NSViewRepresentable where Coordinator == Void {
 
 /// Exists to handle `deinit`, the rest of the stuff is just in here cause
 /// it's a convenient location.
+@MainActor
 final class RepresentingWidget<Representable: NSViewRepresentable>: NSView {
     var representable: Representable
     var context: Representable.Context?
@@ -227,8 +228,10 @@ final class RepresentingWidget<Representable: NSViewRepresentable>: NSView {
     }
 
     deinit {
-        if let context {
-            Representable.dismantleNSView(subview, coordinator: context.coordinator)
+        MainActor.assumeIsolated {
+            if let context {
+                Representable.dismantleNSView(subview, coordinator: context.coordinator)
+            }
         }
     }
 }

@@ -36,7 +36,7 @@ public protocol Shape: View, Sendable where Content == EmptyView {
     /// ```
     ///
     /// - Parameter bounds: The bounds of this shape.
-    func path(in bounds: Path.Rect) -> Path
+    nonisolated func path(in bounds: Path.Rect) -> Path
 
     /// Determine the ideal size of this shape given the proposed bounds.
     ///
@@ -45,13 +45,13 @@ public protocol Shape: View, Sendable where Content == EmptyView {
     ///
     /// - Parameter proposal: The proposed bounds of this shape.
     /// - Returns: The shape's size for the given proposal.
-    func size(fitting proposal: ProposedViewSize) -> ViewSize
+    nonisolated func size(fitting proposal: ProposedViewSize) -> ViewSize
 }
 
 extension Shape {
     public var body: EmptyView { return EmptyView() }
 
-    public func size(fitting proposal: ProposedViewSize) -> ViewSize {
+    public nonisolated func size(fitting proposal: ProposedViewSize) -> ViewSize {
         proposal.replacingUnspecifiedDimensions(by: ViewSize(10, 10))
     }
 

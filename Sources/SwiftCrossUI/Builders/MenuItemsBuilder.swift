@@ -1,5 +1,6 @@
 /// A result builder for `[MenuItem]`.
 @resultBuilder
+@MainActor
 public struct MenuItemsBuilder {
     public static func buildBlock() -> [MenuItem] {
         []
