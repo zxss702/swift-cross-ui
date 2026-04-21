@@ -1,4 +1,4 @@
-// swift-tools-version:5.10
+// swift-tools-version: 6.1
 
 import CompilerPluginSupport
 import Foundation
@@ -153,7 +153,7 @@ let package = Package(
         .package(
             url: "https://github.com/apple/swift-log.git",
             // swift-log bumped its swift-tools-version in 1.7.0
-            .upToNextMinor(from: "1.6.4")
+            .upToNextMinor(from: "1.7.0")
         ),
         .package(
             url: "https://github.com/swhitty/swift-mutex",
