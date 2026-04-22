@@ -34,7 +34,7 @@ extension WinUI.Window {
     }
 }
 
-private struct HWNDInterop {
+private struct HWNDInterop: @unchecked Sendable {
     private typealias pfnGetWindowIdFromWindow =
         @convention(c) (
             HWND?, UnsafeMutablePointer<__x_ABI_CMicrosoft_CUI_CWindowId>?

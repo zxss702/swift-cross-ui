@@ -21,6 +21,7 @@ extension App {
 }
 
 class WinUIApplication: SwiftApplication {
+    nonisolated(unsafe)
     static var callback: ((WinUIApplication) -> Void)?
 
     override func onLaunched(_ args: WinUI.LaunchActivatedEventArgs) {
@@ -2359,8 +2360,8 @@ final class CustomDatePicker: StackPanel {
     private var calendar = Calendar.current
     private var needsUpdate = false
     var onChange: ((Date) -> Void)?
-    private var timeChangedEvent: EventCleanup?
-    private var dateChangedEvent: EventCleanup?
+    private nonisolated(unsafe) var timeChangedEvent: EventCleanup?
+    private nonisolated(unsafe) var dateChangedEvent: EventCleanup?
 
     func toggleTimeView(shown: Bool) {
         guard shown != (self.timeView != nil) else { return }

@@ -66,6 +66,7 @@ public protocol WinUIElementRepresentable: View where Content == Never {
     /// - Parameters:
     ///   - gtkElement: The element being dismantled.
     ///   - coordinator: The coordinator.
+    @MainActor
     static func dismantleWinUIElement(_ winUIElement: WinUIElementType, coordinator: Coordinator)
 }
 
@@ -75,6 +76,7 @@ extension WinUIElementRepresentable {
 }
 
 extension WinUIElementRepresentable {
+    @MainActor
     public static func dismantleWinUIElement(_: WinUIElementType, coordinator _: Coordinator) {
         // no-op
     }
@@ -192,7 +194,7 @@ extension WinUIElementRepresentable where Coordinator == Void {
 @MainActor
 final class RepresentingWidget<Representable: WinUIElementRepresentable>: WinUI.Canvas {
     var representable: Representable
-    var context: Representable.Context?
+    nonisolated(unsafe) var context: Representable.Context?
     var savedSize: SIMD2<Double>?
 
     init(representable: Representable) {
@@ -200,7 +202,7 @@ final class RepresentingWidget<Representable: WinUIElementRepresentable>: WinUI.
         super.init()
     }
 
-    var child: Representable.WinUIElementType?
+    nonisolated(unsafe) var child: Representable.WinUIElementType?
 
     func update(with environment: EnvironmentValues) {
         if var context, let child {
@@ -221,8 +223,15 @@ final class RepresentingWidget<Representable: WinUIElementRepresentable>: WinUI.
     }
 
     deinit {
-        if let context, let child {
-            Representable.dismantleWinUIElement(child, coordinator: context.coordinator)
+        let context = context
+        let child = child
+        MainActor.assumeIsolated {
+            if let context, let child {
+                Representable.dismantleWinUIElement(
+                    child,
+                    coordinator: context.coordinator
+                )
+            }
         }
     }
 }
