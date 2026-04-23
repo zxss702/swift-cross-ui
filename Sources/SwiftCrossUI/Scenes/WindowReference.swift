@@ -3,7 +3,7 @@ import PerceptionCore
 
 /// Holds the view graph and window handle for a single window.
 @MainActor
-final class WindowReference<SceneType: WindowingScene> {
+final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
     /// The scene.
     private var scene: SceneType
     /// The view graph of the window's root view.
@@ -19,9 +19,8 @@ final class WindowReference<SceneType: WindowingScene> {
     /// The window's preferred color scheme, cached from the last update.
     private var preferredColorScheme: ColorScheme?
     
-    /// Stores the ID of the current call to `withPerceptionTracking()`. Helps preventing
-    /// duplicate view updates.
-    private var currentPerceptionTrackingID: UUID?
+    /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
+    var currentViewModelObservationID: UUID?
 
     /// - Parameters:
     ///   - closeHandler: The action to perform when the window is closed. Should
@@ -181,22 +180,7 @@ final class WindowReference<SceneType: WindowingScene> {
             environment.colorScheme = preferredColorScheme
         }
         
-        var content: SceneType.Content?
-        let perceptionTrackingID = UUID()
-        self.currentPerceptionTrackingID = perceptionTrackingID
-        withPerceptionTracking {
-            content = newScene?.content()
-        } onChange: { [weak self] in
-            backend.runInMainThread {
-                guard
-                    let self,
-                    self.currentPerceptionTrackingID == perceptionTrackingID
-                else { return }
-                self.update(self.scene, backend: backend, environment: self.parentEnvironment)
-            }
-        }
-
-
+        let content = self.observe(in: backend) { newScene?.content() }
         let probingResult = viewGraph.computeLayout(
             with: content,
             proposedSize: .zero,
@@ -307,6 +291,10 @@ final class WindowReference<SceneType: WindowingScene> {
             backend.show(window: window)
             isFirstUpdate = false
         }
+    }
+    
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
+        self.update(self.scene, backend: backend, environment: self.parentEnvironment)
     }
 
     func activate<Backend: AppBackend>(backend: Backend) {
