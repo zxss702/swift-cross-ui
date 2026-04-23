@@ -138,6 +138,7 @@ extension View where Self: GtkWidgetRepresentable {
         }
 
         let representingWidget = widget as! RepresentingWidget<Self>
+        representingWidget.representable = self
         if let child = representingWidget.child,
             let savedSizeRequest = representingWidget.savedSizeRequest
         {

@@ -139,6 +139,7 @@ extension View where Self: Gtk3WidgetRepresentable {
         }
 
         let representingWidget = widget as! RepresentingWidget<Self>
+        representingWidget.representable = self
         if let child = representingWidget.child,
             let savedSizeRequest = representingWidget.savedSizeRequest
         {

@@ -127,6 +127,7 @@ extension View where Self: UIViewControllerRepresentable {
         backend _: Backend
     ) -> ViewLayoutResult {
         let representingWidget = widget as! ControllerRepresentingWidget<Self>
+        representingWidget.representable = self
         representingWidget.update(with: environment)
 
         let size = representingWidget.representable.sizeThatFits(
