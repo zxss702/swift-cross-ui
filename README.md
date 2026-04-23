@@ -84,6 +84,43 @@ struct YourApp: App {
 ```
 Figure 2: *Sources/YourApp/YourApp.swift*
 
+SwiftCrossUI also supports Swift's Observation system on platforms where Apple's
+`Observation` framework is available:
+
+```swift
+import Observation
+import SwiftCrossUI
+import DefaultBackend
+
+@Observable
+final class Settings {
+    var count = 0
+}
+
+struct CounterEditor: View {
+    @Bindable var settings: Settings
+
+    var body: some View {
+        HStack {
+            Button("-") { settings.count -= 1 }
+            Text("Count: \(settings.count)")
+            Button("+") { settings.count += 1 }
+        }
+    }
+}
+
+@main
+struct YourApp: App {
+    @State var settings = Settings()
+
+    var body: some Scene {
+        WindowGroup("YourApp") {
+            CounterEditor(settings: settings)
+        }
+    }
+}
+```
+
 ## More examples
 
 The SwiftCrossUI repository contains the above example and many more. The documentation hosts [a detailed list of all examples](https://docs.swiftcrossui.dev/documentation/swiftcrossui/examples).

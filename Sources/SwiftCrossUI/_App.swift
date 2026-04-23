@@ -17,6 +17,8 @@ class _App<AppRoot: App> {
     var environment: EnvironmentValues
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
+    /// Tracks Swift Observation dependencies accessed while computing `App.body`.
+    private let observationTrackingState = ObservationTrackingState()
 
     /// Wraps a user's app implementation.
     init(_ app: AppRoot) {
@@ -35,7 +37,19 @@ class _App<AppRoot: App> {
         dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
         if let sceneGraphRoot {
-            let result = sceneGraphRoot.updateNode(app.body, environment: environment)
+            @UncheckedSendable var backend = backend
+            let body = withObservationTrackingIfAvailable(
+                state: observationTrackingState,
+                apply: {
+                    app.body
+                },
+                onChange: { [weak self, backend] in
+                    backend.runInMainThread {
+                        self?.refreshSceneGraph()
+                    }
+                }
+            )
+            let result = sceneGraphRoot.updateNode(body, environment: environment)
             backend.setApplicationMenu(
                 result.preferences.commands.resolve(),
                 environment: environment
@@ -80,8 +94,21 @@ class _App<AppRoot: App> {
                 cancellables.append(cancellable)
             }
 
+            @UncheckedSendable var backend = backend
+            let body = withObservationTrackingIfAvailable(
+                state: observationTrackingState,
+                apply: {
+                    app.body
+                },
+                onChange: { [weak self, backend] in
+                    backend.runInMainThread {
+                        self?.refreshSceneGraph()
+                    }
+                }
+            )
+
             let rootNode = AppRoot.Body.Node(
-                from: app.body,
+                from: body,
                 backend: backend,
                 environment: environment
             )

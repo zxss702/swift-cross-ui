@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(Observation)
+    import Observation
+#endif
+
 // TODO: Document State properly, this is an important type.
 // - It supports value types
 // - It supports ObservableObject
@@ -66,6 +70,14 @@ extension State {
     public init(wrappedValue initialValue: Value) where Value: ObservableObject {
         implementation = StateImpl(initialStorage: Storage(initialValue))
     }
+
+    #if canImport(Observation)
+        // Observation models are supported via dependency tracking during view updates.
+        @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0, *)
+        public init(wrappedValue initialValue: Value) where Value: AnyObject & Observation.Observable {
+            implementation = StateImpl(initialStorage: Storage(initialValue))
+        }
+    #endif
 }
 
 extension State: SnapshottableProperty {

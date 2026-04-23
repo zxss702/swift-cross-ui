@@ -59,6 +59,9 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
 
     /// The dynamic property updater for this view.
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
+    
+    /// Tracks Swift Observation dependencies accessed while rendering this node.
+    private let observationTrackingState = ObservationTrackingState()
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -92,10 +95,21 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: nil)
 
-        let children = view.children(
-            backend: backend,
-            snapshots: childSnapshots,
-            environment: viewEnvironment
+        @UncheckedSendable var backend = backend
+        let children = withObservationTrackingIfAvailable(
+            state: observationTrackingState,
+            apply: {
+                view.children(
+                    backend: backend,
+                    snapshots: childSnapshots,
+                    environment: viewEnvironment
+                )
+            },
+            onChange: { [weak self, backend] in
+                backend.runInMainThread {
+                    self?.bottomUpUpdate()
+                }
+            }
         )
         self.children = children
 
@@ -230,12 +244,23 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
 
-        let result = view.computeLayout(
-            widget,
-            children: children,
-            proposedSize: proposedSize,
-            environment: viewEnvironment,
-            backend: backend
+        @UncheckedSendable var backend = backend
+        let result = withObservationTrackingIfAvailable(
+            state: observationTrackingState,
+            apply: {
+                view.computeLayout(
+                    widget,
+                    children: children,
+                    proposedSize: proposedSize,
+                    environment: viewEnvironment,
+                    backend: backend
+                )
+            },
+            onChange: { [weak self, backend] in
+                backend.runInMainThread {
+                    self?.bottomUpUpdate()
+                }
+            }
         )
 
         // We assume that the view's sizing behaviour won't change between consecutive

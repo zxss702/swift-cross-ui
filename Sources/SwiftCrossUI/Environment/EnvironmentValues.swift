@@ -55,8 +55,8 @@ public struct EnvironmentValues {
     /// proposal received by each view must be its intended final proposal.
     var allowLayoutCaching: Bool = false
 
-    /// Backing storage for observable subscript
-    private var observableObjects: [ObjectIdentifier: any ObservableObject]
+    /// Backing storage for object-typed environment values.
+    private var observableObjects: [ObjectIdentifier: Any]
 
     /// Gets an environment value given an environment key's metatype.
     ///
@@ -72,7 +72,7 @@ public struct EnvironmentValues {
         }
     }
 
-    public subscript<T: ObservableObject>(observable key: T.Type) -> T? {
+    public subscript<T: AnyObject>(observable key: T.Type) -> T? {
         get {
             guard let value = observableObjects[ObjectIdentifier(T.self)] as? T? else {
                 let message =

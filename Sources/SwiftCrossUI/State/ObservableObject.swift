@@ -117,8 +117,18 @@ public macro ObservableObject() =
 /// Apply to a member inside your `@ObservableObject` class to opt out of observation
 // This macro is just used as a flag for `@ObservableObject` to ignore a specific property
 @attached(accessor)
-public macro ObservationIgnored() =
+public macro ObservableObjectIgnored() =
     #externalMacro(
         module: "SwiftCrossUIMacrosPlugin",
         type: "ObservationIgnoredMacro"
     )
+
+#if !canImport(Observation)
+    @available(*, deprecated, renamed: "ObservableObjectIgnored")
+    @attached(accessor)
+    public macro ObservationIgnored() =
+        #externalMacro(
+            module: "SwiftCrossUIMacrosPlugin",
+            type: "ObservationIgnoredMacro"
+        )
+#endif
