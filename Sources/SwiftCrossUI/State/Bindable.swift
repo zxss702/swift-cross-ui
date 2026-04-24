@@ -38,3 +38,9 @@ public struct Bindable<Value: AnyObject>: DynamicProperty {
 
     public func update(with environment: EnvironmentValues, previousValue: Bindable<Value>?) {}
 }
+
+extension Bindable: DynamicPropertyStorageIdentity {
+    var dynamicPropertyStorageIdentity: AnyObject {
+        wrappedValue
+    }
+}

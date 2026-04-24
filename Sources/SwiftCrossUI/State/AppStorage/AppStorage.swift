@@ -174,3 +174,9 @@ extension AppStorage {
         )
     }
 }
+
+extension AppStorage: DynamicPropertyStorageIdentity {
+    var dynamicPropertyStorageIdentity: AnyObject {
+        implementation.box
+    }
+}

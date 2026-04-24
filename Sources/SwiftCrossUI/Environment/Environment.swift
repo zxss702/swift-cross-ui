@@ -101,3 +101,9 @@ public struct Environment<Value>: DynamicProperty {
         }
     }
 }
+
+extension Environment: DynamicPropertyStorageIdentity {
+    var dynamicPropertyStorageIdentity: AnyObject {
+        value
+    }
+}

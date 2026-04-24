@@ -100,3 +100,9 @@ extension State: SnapshottableProperty {
         }
     }
 }
+
+extension State: DynamicPropertyStorageIdentity {
+    var dynamicPropertyStorageIdentity: AnyObject {
+        implementation.box
+    }
+}

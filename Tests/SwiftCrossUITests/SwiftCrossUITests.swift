@@ -22,6 +22,18 @@ struct CounterView: View {
     }
 }
 
+private final class DynamicPropertyProbeModel {}
+
+private struct DynamicPropertyProbeView: View {
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(DynamicPropertyProbeModel.self) var model
+    @State var count = 0
+
+    var body: some View {
+        Text("")
+    }
+}
+
 struct TestError: LocalizedError {
     var message: String
 
@@ -32,6 +44,15 @@ struct TestError: LocalizedError {
 
 @Suite("Testing for SwiftCrossUI")
 struct SwiftCrossUITests: Sendable {
+    @Test("DynamicPropertyUpdater finds storage-backed property offsets")
+    @MainActor
+    func testDynamicPropertyUpdaterFindsStorageBackedOffsets() {
+        let updater = DynamicPropertyUpdater(for: DynamicPropertyProbeView())
+
+        #expect(updater.propertyUpdaters != nil)
+        #expect(updater.propertyUpdaters?.count == 3)
+    }
+
     @Test("Ensures that a NavigationPath can be round tripped to and from JSON")
     func testCodableNavigationPath() throws {
         var path = NavigationPath()
