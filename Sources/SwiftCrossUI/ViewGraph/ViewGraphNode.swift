@@ -61,7 +61,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
     
     /// Tracks Swift Observation dependencies accessed while rendering this node.
-    private let observationTrackingState = ObservationTrackingState()
+    let observationTrackingState = ObservationTrackingState()
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -95,23 +95,13 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: nil)
 
-        @UncheckedSendable var backend = backend
-        let children = withObservationTrackingIfAvailable(
-            state: observationTrackingState,
-            apply: {
-                view.children(
-                    backend: backend,
-                    snapshots: childSnapshots,
-                    environment: viewEnvironment
-                )
-            },
-            onChange: { [weak self, backend] in
-                backend.runInMainThread {
-                    self?.bottomUpUpdate()
-                }
-            }
-        )
-        self.children = children
+        self.children = observe(in: backend) {
+            view.children(
+                backend: backend,
+                snapshots: childSnapshots,
+                environment: viewEnvironment
+            )
+        }
 
         // Then create the widget for the view itself
         let widget = view.asWidget(
@@ -149,10 +139,26 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
         }
     }
 
+    func viewModelDidChange<B: AppBackend>(backend: B) {
+        bottomUpUpdate()
+    }
+
+    private func refreshViewObservation() {
+        guard NodeView.Content.self != Never.self else {
+            return
+        }
+
+        _ = observe(in: backend) {
+            view.body
+        }
+    }
+
     /// Triggers the view to be updated as part of a bottom-up chain of updates (where either the
     /// current view gets updated due to a state change and has potential to trigger its parent to
     /// update as well, or the current view's child has propagated such an update upwards).
     private func bottomUpUpdate() {
+        refreshViewObservation()
+
         // First we compute what size the view will be after the update. If it will change size,
         // propagate the update to this node's parent instead of updating straight away.
         let currentSize = currentLayout?.size
@@ -243,24 +249,16 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
         let viewEnvironment = updateEnvironment(environment)
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
+        if newView != nil {
+            refreshViewObservation()
+        }
 
-        @UncheckedSendable var backend = backend
-        let result = withObservationTrackingIfAvailable(
-            state: observationTrackingState,
-            apply: {
-                view.computeLayout(
-                    widget,
-                    children: children,
-                    proposedSize: proposedSize,
-                    environment: viewEnvironment,
-                    backend: backend
-                )
-            },
-            onChange: { [weak self, backend] in
-                backend.runInMainThread {
-                    self?.bottomUpUpdate()
-                }
-            }
+        let result = view.computeLayout(
+            widget,
+            children: children,
+            proposedSize: proposedSize,
+            environment: viewEnvironment,
+            backend: backend
         )
 
         // We assume that the view's sizing behaviour won't change between consecutive
@@ -316,3 +314,5 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
         return currentLayout
     }
 }
+
+extension ViewGraphNode: ViewModelObserver {}

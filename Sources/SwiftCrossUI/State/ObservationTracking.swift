@@ -22,6 +22,30 @@ final class ObservationTrackingState: @unchecked Sendable {
     }
 }
 
+@MainActor
+protocol ViewModelObserver: AnyObject, Sendable {
+    var observationTrackingState: ObservationTrackingState { get }
+
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend)
+}
+
+extension ViewModelObserver {
+    func observe<Backend: AppBackend, Result>(
+        in backend: Backend,
+        _ computation: () -> Result
+    ) -> Result {
+        withObservationTrackingIfAvailable(
+            state: observationTrackingState,
+            apply: computation,
+            onChange: { [weak self, backend] in
+                backend.runInMainThread {
+                    self?.viewModelDidChange(backend: backend)
+                }
+            }
+        )
+    }
+}
+
 @inline(__always)
 func withObservationTrackingIfAvailable<T>(
     state: ObservationTrackingState,

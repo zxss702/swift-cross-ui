@@ -4,7 +4,7 @@
 /// the view graph alongside the app (we can't do that on a user's ``App`` implementation because
 /// we can only add computed properties).
 @MainActor
-class _App<AppRoot: App> {
+class _App<AppRoot: App>: ViewModelObserver {
     /// The app being run.
     let app: AppRoot
     /// An instance of the app's selected backend.
@@ -18,7 +18,7 @@ class _App<AppRoot: App> {
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
     /// Tracks Swift Observation dependencies accessed while computing `App.body`.
-    private let observationTrackingState = ObservationTrackingState()
+    let observationTrackingState = ObservationTrackingState()
 
     /// Wraps a user's app implementation.
     init(_ app: AppRoot) {
@@ -37,18 +37,7 @@ class _App<AppRoot: App> {
         dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
         if let sceneGraphRoot {
-            @UncheckedSendable var backend = backend
-            let body = withObservationTrackingIfAvailable(
-                state: observationTrackingState,
-                apply: {
-                    app.body
-                },
-                onChange: { [weak self, backend] in
-                    backend.runInMainThread {
-                        self?.refreshSceneGraph()
-                    }
-                }
-            )
+            let body = observe(in: backend) { app.body }
             let result = sceneGraphRoot.updateNode(body, environment: environment)
             backend.setApplicationMenu(
                 result.preferences.commands.resolve(),
@@ -94,18 +83,7 @@ class _App<AppRoot: App> {
                 cancellables.append(cancellable)
             }
 
-            @UncheckedSendable var backend = backend
-            let body = withObservationTrackingIfAvailable(
-                state: observationTrackingState,
-                apply: {
-                    app.body
-                },
-                onChange: { [weak self, backend] in
-                    backend.runInMainThread {
-                        self?.refreshSceneGraph()
-                    }
-                }
-            )
+            let body = observe(in: backend) { app.body }
 
             let rootNode = AppRoot.Body.Node(
                 from: body,
@@ -131,5 +109,9 @@ class _App<AppRoot: App> {
             rootNode.update(backend: backend, environment: environment)
             self.sceneGraphRoot = rootNode
         }
+    }
+
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
+        refreshSceneGraph()
     }
 }

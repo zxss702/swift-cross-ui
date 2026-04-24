@@ -1,6 +1,6 @@
 /// Holds the view graph and window handle for a single window.
 @MainActor
-final class WindowReference<SceneType: WindowingScene> {
+final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
     /// The scene.
     private var scene: SceneType
     /// The view graph of the window's root view.
@@ -15,6 +15,8 @@ final class WindowReference<SceneType: WindowingScene> {
     private let containerWidget: AnyWidget
     /// The window's preferred color scheme, cached from the last update.
     private var preferredColorScheme: ColorScheme?
+    /// Tracks Swift Observation dependencies accessed while computing scene content.
+    let observationTrackingState = ObservationTrackingState()
 
     /// - Parameters:
     ///   - closeHandler: The action to perform when the window is closed. Should
@@ -174,8 +176,9 @@ final class WindowReference<SceneType: WindowingScene> {
             environment.colorScheme = preferredColorScheme
         }
 
+        let content = observe(in: backend) { newScene?.content() }
         let probingResult = viewGraph.computeLayout(
-            with: newScene?.content(),
+            with: content,
             proposedSize: .zero,
             environment: environment
                 .with(\.allowLayoutCaching, true)
@@ -195,7 +198,7 @@ final class WindowReference<SceneType: WindowingScene> {
         switch environment.windowResizability {
             case .contentSize:
                 let result = viewGraph.computeLayout(
-                    with: newScene?.content(),
+                    with: content,
                     proposedSize: .infinity,
                     environment: environment.with(\.allowLayoutCaching, true)
                 )
@@ -292,6 +295,10 @@ final class WindowReference<SceneType: WindowingScene> {
         }
 
         backend.activate(window: window)
+    }
+
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
+        update(scene, backend: backend, environment: parentEnvironment)
     }
 
     private func updateEnvironment<Backend: AppBackend>(
