@@ -462,7 +462,10 @@ public final class GtkBackend: AppBackend {
                 return 0
             },
             Unmanaged<ThreadActionContext>.passRetained(action).toOpaque(),
-            { _ in }
+            { context in
+                guard let context else { return }
+                Unmanaged<ThreadActionContext>.fromOpaque(context).release()
+            }
         )
     }
 
@@ -489,7 +492,10 @@ public final class GtkBackend: AppBackend {
                 return 0
             },
             Unmanaged<ThreadActionContext>.passRetained(action).toOpaque(),
-            { _ in }
+            { context in
+                guard let context else { return }
+                Unmanaged<ThreadActionContext>.fromOpaque(context).release()
+            }
         )
     }
 
