@@ -19,6 +19,14 @@ class _App<AppRoot: App>: ViewModelObserver {
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
     /// Tracks Swift Observation dependencies accessed while computing `App.body`.
     let observationTrackingState = ObservationTrackingState()
+    private lazy var updateScheduler = ViewUpdateScheduler(
+        schedule: { [backend] action in
+            backend.runInMainThread(action: action)
+        },
+        flush: { [weak self] transaction in
+            self?.refreshSceneGraph(transaction: transaction)
+        }
+    )
 
     /// Wraps a user's app implementation.
     init(_ app: AppRoot) {
@@ -30,23 +38,32 @@ class _App<AppRoot: App>: ViewModelObserver {
         dynamicPropertyUpdater = DynamicPropertyUpdater(for: app)
     }
 
-    func refreshSceneGraph() {
-        // TODO: Do we have to update dynamic properties on state changes?
-        //   We can probably get away with only doing it when the root
-        //   environment changes.
-        dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
+    func refreshSceneGraph(transaction: Transaction = Transaction.current) {
+        withTransaction(transaction) {
+            // TODO: Do we have to update dynamic properties on state changes?
+            //   We can probably get away with only doing it when the root
+            //   environment changes.
+            dynamicPropertyUpdater.update(
+                app,
+                with: environment.with(\.transaction, transaction),
+                previousValue: nil
+            )
 
-        if let sceneGraphRoot {
-            let body = observe(in: backend) { app.body }
-            let result = sceneGraphRoot.updateNode(body, environment: environment)
-            backend.setApplicationMenu(
-                result.preferences.commands.resolve(),
-                environment: environment
-            )
-            sceneGraphRoot.update(
-                backend: backend,
-                environment: environment
-            )
+            if let sceneGraphRoot {
+                let body = observe(in: backend) { app.body }
+                let result = sceneGraphRoot.updateNode(
+                    body,
+                    environment: environment.with(\.transaction, transaction)
+                )
+                backend.setApplicationMenu(
+                    result.preferences.commands.resolve(),
+                    environment: environment.with(\.transaction, transaction)
+                )
+                sceneGraphRoot.update(
+                    backend: backend,
+                    environment: environment.with(\.transaction, transaction)
+                )
+            }
         }
     }
 
@@ -77,8 +94,10 @@ class _App<AppRoot: App>: ViewModelObserver {
                 }
 
                 let cancellable =
-                    value.didChange.observeAsUIUpdater(backend: backend) { [weak self] in
-                        self?.refreshSceneGraph()
+                    value.didChange.observe { [weak self, backend] transaction in
+                        backend.runInMainThread {
+                            self?.updateScheduler.invalidate(transaction: transaction)
+                        }
                     }
                 cancellables.append(cancellable)
             }
@@ -111,7 +130,7 @@ class _App<AppRoot: App>: ViewModelObserver {
         }
     }
 
-    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
-        refreshSceneGraph()
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend, transaction: Transaction) {
+        updateScheduler.invalidate(transaction: transaction)
     }
 }

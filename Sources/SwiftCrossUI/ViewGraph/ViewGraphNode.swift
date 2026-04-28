@@ -62,6 +62,14 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
     
     /// Tracks Swift Observation dependencies accessed while rendering this node.
     let observationTrackingState = ObservationTrackingState()
+    private lazy var updateScheduler = ViewUpdateScheduler(
+        schedule: { [backend] action in
+            backend.runInMainThread(action: action)
+        },
+        flush: { [weak self] transaction in
+            self?.bottomUpUpdate(transaction: transaction)
+        }
+    )
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -108,6 +116,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
             children,
             backend: backend
         )
+        AnimationRuntime.resetPresentation(of: widget)
         _widget = widget
 
         let tag = String(String(describing: NodeView.self).split(separator: "<")[0])
@@ -131,16 +140,17 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
 
             cancellables.append(
                 value.didChange
-                    .observeAsUIUpdater(backend: backend) { [weak self] in
-                        guard let self else { return }
-                        self.bottomUpUpdate()
+                    .observe { [weak self, backend] transaction in
+                        backend.runInMainThread {
+                            self?.updateScheduler.invalidate(transaction: transaction)
+                        }
                     }
             )
         }
     }
 
-    func viewModelDidChange<B: AppBackend>(backend: B) {
-        bottomUpUpdate()
+    func viewModelDidChange<B: AppBackend>(backend: B, transaction: Transaction) {
+        updateScheduler.invalidate(transaction: transaction)
     }
 
     private func refreshViewObservation() {
@@ -156,30 +166,33 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
     /// Triggers the view to be updated as part of a bottom-up chain of updates (where either the
     /// current view gets updated due to a state change and has potential to trigger its parent to
     /// update as well, or the current view's child has propagated such an update upwards).
-    private func bottomUpUpdate() {
-        refreshViewObservation()
+    private func bottomUpUpdate(transaction: Transaction = Transaction()) {
+        withTransaction(transaction) {
+            refreshViewObservation()
 
-        // First we compute what size the view will be after the update. If it will change size,
-        // propagate the update to this node's parent instead of updating straight away.
-        let currentSize = currentLayout?.size
-        let newLayout = self.computeLayout(
-            proposedSize: lastProposedSize,
-            environment: parentEnvironment
-        )
+            // First we compute what size the view will be after the update. If it will change size,
+            // propagate the update to this node's parent instead of updating straight away.
+            let currentSize = currentLayout?.size
+            let newLayout = self.computeLayout(
+                proposedSize: lastProposedSize,
+                environment: parentEnvironment.with(\.transaction, transaction)
+            )
 
-        self.currentLayout = newLayout
-        if newLayout.size != currentSize {
-            resultCache[lastProposedSize] = newLayout
-            parentEnvironment.onResize(newLayout.size)
-        } else {
-            _ = self.commit()
+            self.currentLayout = newLayout
+            if newLayout.size != currentSize {
+                resultCache[lastProposedSize] = newLayout
+                parentEnvironment.onResize(newLayout.size)
+            } else {
+                _ = self.commit()
+                flushLayout()
+            }
         }
     }
 
     private func updateEnvironment(_ environment: EnvironmentValues) -> EnvironmentValues {
         environment.with(\.onResize) { [weak self] _ in
             guard let self else { return }
-            self.bottomUpUpdate()
+            self.updateScheduler.invalidate(transaction: environment.transaction)
         }
     }
 
@@ -312,6 +325,17 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
         backend.showUpdate(of: widget)
 
         return currentLayout
+    }
+
+    func flushLayout() {
+        backend.flushLayout(of: widget)
+    }
+
+    func resetAnimationPresentationRecursively() {
+        AnimationRuntime.resetPresentation(of: widget)
+        for child in children.erasedNodes {
+            child.resetAnimationPresentation()
+        }
     }
 }
 

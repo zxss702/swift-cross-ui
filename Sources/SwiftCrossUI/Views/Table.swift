@@ -159,18 +159,20 @@ public struct Table<RowValue, RowContent: TableRowContent<RowValue>>: TypeSafeVi
             for (columnIndex, cell) in rowCells.enumerated() {
                 let index = rowIndex * columnCount + columnIndex
                 let cellSize = cell.commit()
-                backend.setPosition(
+                AnimationRuntime.setPosition(
                     ofChildAt: 0,
                     in: children.cellContainerWidgets[index].into(),
                     to: SIMD2(
                         0,
                         (rowHeight - cellSize.size.vector.y) / 2
-                    )
+                    ),
+                    environment: environment,
+                    backend: backend
                 )
             }
         }
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }
 

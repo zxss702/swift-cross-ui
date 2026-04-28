@@ -12,6 +12,7 @@ public struct PreferenceValues: Sendable {
         windowDismissBehavior: nil,
         preferredWindowMinimizeBehavior: nil,
         windowResizeBehavior: nil,
+        transition: nil,
         layoutPriority: defaultLayoutPriority
     )
 
@@ -45,6 +46,9 @@ public struct PreferenceValues: Sendable {
 
     /// Controls whether the user can resize the enclosing window.
     public var windowResizeBehavior: WindowInteractionBehavior?
+
+    /// The transition used when this view is inserted into or removed from a conditional branch.
+    var transition: AnyTransition?
 
     /// The layout priority of the view.
     var layoutPriority: Double
@@ -89,6 +93,7 @@ extension PreferenceValues {
         preferredWindowMinimizeBehavior =
             children.compactMap(\.preferredWindowMinimizeBehavior).first
         windowResizeBehavior = children.compactMap(\.windowResizeBehavior).first
+        transition = children.compactMap(\.transition).first
 
         if let firstChild = children.first, children.count == 1 {
             layoutPriority = firstChild.layoutPriority

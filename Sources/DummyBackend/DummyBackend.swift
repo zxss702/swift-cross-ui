@@ -44,6 +44,11 @@ public final class DummyBackend: AppBackend {
     public class Widget {
         public var tag: String?
         public var cornerRadius = 0
+        public var opacity = 1.0
+        public var scale = SIMD2<Double>(1, 1)
+        public var translation = SIMD2<Double>.zero
+        public var rotation = Angle.zero
+        public var transformAnchor = UnitPoint.center
         public var size = SIMD2<Int>.zero
         public var naturalSize: SIMD2<Int> {
             SIMD2<Int>.zero
@@ -391,15 +396,28 @@ public final class DummyBackend: AppBackend {
     }
 
     public func swap(childAt firstIndex: Int, withChildAt secondIndex: Int, in container: Widget) {
-        (container as! Container).children.swapAt(firstIndex, secondIndex)
+        let container = container as! Container
+        guard container.children.indices.contains(firstIndex),
+            container.children.indices.contains(secondIndex)
+        else {
+            return
+        }
+        container.children.swapAt(firstIndex, secondIndex)
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
-        (container as! Container).children[index].position = position
+        let container = container as! Container
+        guard container.children.indices.contains(index) else {
+            return
+        }
+        container.children[index].position = position
     }
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Container
+        guard container.children.indices.contains(index) else {
+            return
+        }
         container.children.remove(at: index)
     }
 
@@ -413,6 +431,24 @@ public final class DummyBackend: AppBackend {
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
         widget.cornerRadius = radius
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = opacity
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint,
+        bounds: SIMD2<Int>?
+    ) {
+        widget.scale = scale
+        widget.translation = translation
+        widget.rotation = rotation
+        widget.transformAnchor = anchor
     }
 
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {

@@ -160,7 +160,7 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         let scrollViewSize = layout.size
         let finalContentSize = children.child.commit().size
 
-        backend.setSize(of: widget, to: scrollViewSize.vector)
+        AnimationRuntime.setSize(of: widget, to: scrollViewSize.vector, environment: environment, backend: backend)
         backend.setSize(
             of: children.innerContainer.into(),
             to: SIMD2(
@@ -193,13 +193,15 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
             contentY = 0
         }
         
-        backend.setPosition(
+        AnimationRuntime.setPosition(
             ofChildAt: 0,
             in: children.innerContainer.into(),
             to: SIMD2(
                 LayoutSystem.roundSize(contentX),
                 LayoutSystem.roundSize(contentY)
-            )
+            ),
+            environment: environment,
+            backend: backend
         )
 
         backend.updateScrollContainer(

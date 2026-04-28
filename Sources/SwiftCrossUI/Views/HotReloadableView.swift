@@ -98,13 +98,24 @@ public struct HotReloadableView: TypeSafeView {
         if children.hasChangedChild {
             backend.removeAllChildren(of: widget)
             backend.insert(children.node.getWidget().into(), into: widget, at: 0)
-            backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+            AnimationRuntime.setPosition(
+                ofChildAt: 0,
+                in: widget,
+                to: .zero,
+                environment: environment,
+                backend: backend
+            )
             children.hasChangedChild = false
         }
 
         _ = children.node.commit()
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: layout.size.vector,
+            environment: environment,
+            backend: backend
+        )
     }
 }
 

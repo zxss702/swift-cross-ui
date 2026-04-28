@@ -130,7 +130,7 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
         let leadingResult = children.leadingChild.commit()
         let trailingResult = children.trailingChild.commit()
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
         backend.setSidebarWidthBounds(
             ofSplitView: widget,
             minimum: LayoutSystem.roundSize(children.minimumLeadingWidth),
@@ -142,21 +142,25 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
         )
 
         // Center pane children
-        backend.setPosition(
+        AnimationRuntime.setPosition(
             ofChildAt: 0,
             in: children.leadingPaneContainer.into(),
             to: SIMD2(
                 leadingWidth - leadingResult.size.vector.x,
                 layout.size.vector.y - leadingResult.size.vector.y
-            ) / 2
+            ) / 2,
+            environment: environment,
+            backend: backend
         )
-        backend.setPosition(
+        AnimationRuntime.setPosition(
             ofChildAt: 0,
             in: children.trailingPaneContainer.into(),
             to: SIMD2(
                 layout.size.vector.x - leadingWidth - trailingResult.size.vector.x,
                 layout.size.vector.y - trailingResult.size.vector.y
-            ) / 2
+            ) / 2,
+            environment: environment,
+            backend: backend
         )
     }
 }

@@ -56,7 +56,10 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
                 proposedWindowSize: newSize,
                 needsWindowSizeCommit: false,
                 backend: backend,
-                environment: self.parentEnvironment,
+                environment: self.parentEnvironment.with(
+                    \.transaction,
+                    Transaction.disablingAnimations
+                ),
                 windowSizeIsFinal:
                     !backend.isWindowProgrammaticallyResizable(window)
             )
@@ -158,12 +161,16 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
                 // TODO: Figure out whether this would still work if we didn't recompute the
                 //   scene's body. I have a vague feeling that it wouldn't work in all cases?
                 //   But I don't have the time to come up with a counterexample right now.
+                let resizeEnvironment = environment.with(
+                    \.transaction,
+                    Transaction.disablingAnimations
+                )
                 self.update(
                     self.scene,
                     proposedWindowSize: backend.size(ofWindow: window),
                     needsWindowSizeCommit: false,
                     backend: backend,
-                    environment: environment
+                    environment: resizeEnvironment
                 )
             }
         let outerColorScheme = environment.colorScheme
@@ -256,10 +263,12 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
             backend: backend
         )
 
-        backend.setPosition(
+        AnimationRuntime.setPosition(
             ofChildAt: 0,
             in: containerWidget.into(),
-            to: (proposedWindowSize &- finalContentResult.size.vector) / 2
+            to: (proposedWindowSize &- finalContentResult.size.vector) / 2,
+            environment: environment,
+            backend: backend
         )
 
         if needsWindowSizeCommit {
@@ -282,6 +291,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         // Delay committing the view graph so that the View.inspectWindow(_:)
         // modifiers can be used to overwrite certain SwiftCrossUI behaviors
         viewGraph.commit()
+        backend.flushLayout(of: containerWidget.into())
 
         if isFirstUpdate {
             backend.show(window: window)
@@ -297,8 +307,12 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         backend.activate(window: window)
     }
 
-    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
-        update(scene, backend: backend, environment: parentEnvironment)
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend, transaction: Transaction) {
+        update(
+            scene,
+            backend: backend,
+            environment: parentEnvironment.with(\.transaction, transaction)
+        )
     }
 
     private func updateEnvironment<Backend: AppBackend>(

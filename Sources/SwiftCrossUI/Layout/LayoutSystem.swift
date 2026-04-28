@@ -56,20 +56,27 @@ public enum LayoutSystem {
                 _ environment: EnvironmentValues
             ) -> ViewLayoutResult
         private var _commit: @MainActor () -> ViewLayoutResult
+        var widget: AnyWidget?
         var tag: String?
+        var positionAnimationKey: ObjectIdentifier?
 
         public init(
             computeLayout:
                 @escaping @MainActor (ProposedViewSize, EnvironmentValues) ->
                 ViewLayoutResult,
             commit: @escaping @MainActor () -> ViewLayoutResult,
-            tag: String? = nil
+            widget: AnyWidget? = nil,
+            tag: String? = nil,
+            positionAnimationKey: ObjectIdentifier? = nil
         ) {
             self.computeLayout = computeLayout
             self._commit = commit
+            self.widget = widget
             self.tag = tag
+            self.positionAnimationKey = positionAnimationKey
         }
 
+        @MainActor
         init<Child: View>(
             _ node: AnyViewGraphNode<Child>,
             child: @escaping @Sendable @MainActor () -> Child?
@@ -84,7 +91,9 @@ public enum LayoutSystem {
                 },
                 commit: {
                     node.commit()
-                }
+                },
+                widget: node.widget,
+                positionAnimationKey: ObjectIdentifier(node)
             )
         }
 
@@ -333,7 +342,12 @@ public enum LayoutSystem {
         backend: Backend
     ) {
         let size = layout.size
-        backend.setSize(of: container, to: size.vector)
+        AnimationRuntime.setSize(
+            of: container,
+            to: size.vector,
+            environment: environment,
+            backend: backend
+        )
 
         let alignment = environment.layoutAlignment
         let spacing = environment.layoutSpacing
@@ -376,7 +390,29 @@ public enum LayoutSystem {
                     position[component: perpendicularOrientation] = outer - inner
             }
 
-            backend.setPosition(ofChildAt: index, in: container, to: position.vector)
+            if let childWidget: Backend.Widget = children[index].widget?.into() {
+                AnimationRuntime.setFrame(
+                    ofChildAt: index,
+                    in: container,
+                    child: childWidget,
+                    to: ViewFrame(
+                        origin: position.vector,
+                        size: child.size.vector
+                    ),
+                    animationKey: children[index].positionAnimationKey,
+                    environment: environment,
+                    backend: backend
+                )
+            } else {
+                AnimationRuntime.setPosition(
+                    ofChildAt: index,
+                    in: container,
+                    to: position.vector,
+                    animationKey: children[index].positionAnimationKey,
+                    environment: environment,
+                    backend: backend
+                )
+            }
 
             position[component: orientation] += child.size[component: orientation] + Double(spacing)
         }

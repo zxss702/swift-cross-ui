@@ -317,6 +317,15 @@ public protocol AppBackend: Sendable {
     /// - Parameter action: The action to run in the main thread.
     nonisolated func runInMainThread(action: @escaping @MainActor () -> Void)
 
+    /// Schedules an animation frame on the backend's UI loop.
+    ///
+    /// Backends with their own event loop should override this instead of
+    /// relying on Swift concurrency timers, so presentation updates are applied
+    /// from the same loop that renders widgets.
+    ///
+    /// - Parameter action: The action to run when the next frame should be applied.
+    nonisolated func scheduleAnimationFrame(action: @escaping @MainActor @Sendable () -> Void)
+
     /// Computes the root environment for an app (e.g. by checking the system's
     /// current theme).
     ///
@@ -435,6 +444,16 @@ public protocol AppBackend: Sendable {
     ///
     /// - Parameter widget: The widget to process.
     func showUpdate(of widget: Widget)
+    /// Flushes any pending backend layout after a coherent SwiftCrossUI commit
+    /// has completed.
+    ///
+    /// Most backends update layout synchronously as properties are assigned.
+    /// Backends that defer layout work, such as AppKit with Auto Layout, can
+    /// use this hook to synchronize presentation transforms with committed
+    /// frame constraints.
+    ///
+    /// - Parameter widget: A widget at or near the root of the updated subtree.
+    func flushLayout(of widget: Widget)
     /// Adds a short tag to a widget to assist during debugging, if the backend supports
     /// such a feature.
     ///
@@ -505,6 +524,26 @@ public protocol AppBackend: Sendable {
     ///   - widget: The widget to set the corner radius of.
     ///   - radius: The corner radius.
     func setCornerRadius(of widget: Widget, to radius: Int)
+
+    /// Sets a widget's opacity from 0 (transparent) to 1 (opaque).
+    ///
+    /// The default implementation ignores opacity. Backends with a universal
+    /// widget opacity primitive should implement this to support opacity
+    /// transitions and the ``View/opacity(_:)`` modifier.
+    func setOpacity(of widget: Widget, to opacity: Double)
+
+    /// Sets a widget's presentation transform.
+    ///
+    /// This should not affect layout. It is used by scale/offset modifiers and
+    /// transitions. Backends without a general transform primitive may ignore it.
+    func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint,
+        bounds: SIMD2<Int>?
+    )
 
     /// Gets the natural size of a given widget.
     ///
@@ -1519,6 +1558,37 @@ extension AppBackend {
         // This only exists for backends such as CursesBackend that need to
         // explicitly be notified that a widget should display queued changes.
         // Most can get away with this empty default implementation.
+    }
+
+    public func flushLayout(of widget: Widget) {
+        // Most backends apply layout synchronously during commit.
+    }
+
+    public nonisolated func scheduleAnimationFrame(
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        Task {
+            try? await Task.sleep(nanoseconds: 16_666_667)
+            await MainActor.run {
+                action()
+            }
+        }
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        // Some backends don't expose a universal opacity primitive. Those
+        // backends can still participate in layout animations.
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint,
+        bounds: SIMD2<Int>?
+    ) {
+        // Some backends don't expose a universal presentation transform.
     }
 }
 

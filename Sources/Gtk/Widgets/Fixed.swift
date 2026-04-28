@@ -46,33 +46,76 @@ open class Fixed: Widget {
     }
 
     public func put(_ child: Widget, x: Double, y: Double) {
+        if child.parentWidget === self {
+            if !children.contains(where: { $0 === child }) {
+                children.append(child)
+            }
+            move(child, x: x, y: y)
+            return
+        }
+
+        if let oldParent = child.parentWidget {
+            guard let oldParent = oldParent as? Fixed else {
+                return
+            }
+            oldParent.remove(child)
+        }
+
         gtk_fixed_put(castedPointer(), child.widgetPointer, x, y)
         children.append(child)
         child.parentWidget = self
     }
 
     public func put(_ child: Widget, index: Int, x: Double, y: Double) {
+        let insertionIndex = max(0, min(index, children.count))
+
+        if child.parentWidget === self {
+            if let oldIndex = children.firstIndex(where: { $0 === child }) {
+                children.remove(at: oldIndex)
+            }
+            children.insert(child, at: min(insertionIndex, children.count))
+            move(child, x: x, y: y)
+            return
+        }
+
+        if let oldParent = child.parentWidget {
+            guard let oldParent = oldParent as? Fixed else {
+                return
+            }
+            oldParent.remove(child)
+        }
+
         gtk_fixed_put(castedPointer(), child.widgetPointer, x, y)
-        children.insert(child, at: index)
+        children.insert(child, at: insertionIndex)
         child.parentWidget = self
     }
 
     public func move(_ child: Widget, x: Double, y: Double) {
+        guard child.parentWidget === self,
+            children.contains(where: { $0 === child })
+        else {
+            return
+        }
+
         gtk_fixed_move(castedPointer(), child.widgetPointer, x, y)
     }
 
     public func remove(_ child: Widget) {
         if let index = children.firstIndex(where: { $0 === child }) {
-            gtk_fixed_remove(castedPointer(), child.widgetPointer)
+            if child.parentWidget === self {
+                gtk_fixed_remove(castedPointer(), child.widgetPointer)
+                child.parentWidget = nil
+            }
             children.remove(at: index)
-            child.parentWidget = nil
         }
     }
 
     public func removeAllChildren() {
         for child in children {
-            gtk_fixed_remove(castedPointer(), child.widgetPointer)
-            child.parentWidget = nil
+            if child.parentWidget === self {
+                gtk_fixed_remove(castedPointer(), child.widgetPointer)
+                child.parentWidget = nil
+            }
         }
         children = []
     }

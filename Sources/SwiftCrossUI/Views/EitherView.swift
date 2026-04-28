@@ -61,20 +61,33 @@ extension EitherView: TypeSafeView {
                 switch children.node {
                     case .a(let nodeA):
                         result = nodeA.computeLayout(
-                            with: a,
+                            with: TransitionHost(
+                                content: a,
+                                transition: children.transition,
+                                phase: .identity
+                            ),
                             proposedSize: proposedSize,
                             environment: environment
                         )
                         hasSwitchedCase = false
                     case .b:
                         let nodeA = AnyViewGraphNode(
-                            for: a,
+                            for: TransitionHost(
+                                content: a,
+                                transition: children.transition,
+                                phase: .identity
+                            ),
                             backend: backend,
                             environment: environment
                         )
+                        children.outgoingNode = children.node
                         children.node = .a(nodeA)
                         result = nodeA.computeLayout(
-                            with: a,
+                            with: TransitionHost(
+                                content: a,
+                                transition: children.transition,
+                                phase: .identity
+                            ),
                             proposedSize: proposedSize,
                             environment: environment
                         )
@@ -84,20 +97,33 @@ extension EitherView: TypeSafeView {
                 switch children.node {
                     case .b(let nodeB):
                         result = nodeB.computeLayout(
-                            with: b,
+                            with: TransitionHost(
+                                content: b,
+                                transition: children.transition,
+                                phase: .identity
+                            ),
                             proposedSize: proposedSize,
                             environment: environment
                         )
                         hasSwitchedCase = false
                     case .a:
                         let nodeB = AnyViewGraphNode(
-                            for: b,
+                            for: TransitionHost(
+                                content: b,
+                                transition: children.transition,
+                                phase: .identity
+                            ),
                             backend: backend,
                             environment: environment
                         )
+                        children.outgoingNode = children.node
                         children.node = .b(nodeB)
                         result = nodeB.computeLayout(
-                            with: b,
+                            with: TransitionHost(
+                                content: b,
+                                transition: children.transition,
+                                phase: .identity
+                            ),
                             proposedSize: proposedSize,
                             environment: environment
                         )
@@ -105,6 +131,9 @@ extension EitherView: TypeSafeView {
                 }
         }
         children.hasSwitchedCase = children.hasSwitchedCase || hasSwitchedCase
+        if let transition = result.preferences.transition {
+            children.transition = transition
+        }
 
         return result
     }
@@ -116,16 +145,82 @@ extension EitherView: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        if children.hasSwitchedCase {
+        let didSwitchCase = children.hasSwitchedCase
+        let didInsertInitial = children.needsInitialInsertion
+        let transition = layout.preferences.transition ?? children.transition
+        if didInsertInitial {
             backend.removeAllChildren(of: widget)
+            _ = children.node.erasedNode.commit()
             backend.insert(children.node.widget.into(), into: widget, at: 0)
-            backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+            AnimationRuntime.setPosition(
+                ofChildAt: 0,
+                in: widget,
+                to: .zero,
+                environment: environment,
+                backend: backend
+            )
+            children.needsInitialInsertion = false
+            children.hasSwitchedCase = false
+            children.outgoingNode = nil
+        } else if didSwitchCase {
+            backend.removeAllChildren(of: widget)
+            if let outgoingNode = children.outgoingNode {
+                backend.insert(outgoingNode.widget.into(), into: widget, at: 0)
+                _ = outgoingNode.erasedNode.commit()
+                AnimationRuntime.setPosition(
+                    ofChildAt: 0,
+                    in: widget,
+                    to: .zero,
+                    environment: environment,
+                    backend: backend
+                )
+                children.removalToken = outgoingNode.animateRemoval(
+                    transition: transition,
+                    environment: environment
+                ) { [weak children] in
+                    guard let children, children.outgoingNode?.matches(outgoingNode) == true else {
+                        return
+                    }
+                    outgoingNode.resetAnimationPresentationRecursively()
+                    backend.removeAllChildren(of: widget)
+                    backend.insert(children.node.widget.into(), into: widget, at: 0)
+                    AnimationRuntime.setPosition(
+                        ofChildAt: 0,
+                        in: widget,
+                        to: .zero,
+                        environment: environment,
+                        backend: backend
+                    )
+                    children.outgoingNode = nil
+                    children.removalToken = nil
+                }
+            }
+
+            let index = children.outgoingNode == nil ? 0 : 1
+            _ = children.node.erasedNode.commit()
+            children.node.setInsertionStart(transition: transition, environment: environment)
+            backend.insert(children.node.widget.into(), into: widget, at: index)
+            AnimationRuntime.setPosition(
+                ofChildAt: index,
+                in: widget,
+                to: .zero,
+                environment: environment,
+                backend: backend
+            )
+            children.node.animateInsertion(transition: transition, environment: environment)
             children.hasSwitchedCase = false
         }
 
-        _ = children.node.erasedNode.commit()
+        if !didSwitchCase && !didInsertInitial {
+            _ = children.node.erasedNode.commit()
+        }
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: layout.size.vector,
+            environment: environment,
+            backend: backend
+        )
     }
 }
 
@@ -134,8 +229,8 @@ class EitherViewChildren<A: View, B: View>: ViewGraphNodeChildren {
     /// A view graph node that wraps one of two possible child view types.
     @MainActor
     enum EitherNode {
-        case a(AnyViewGraphNode<A>)
-        case b(AnyViewGraphNode<B>)
+        case a(AnyViewGraphNode<TransitionHost<A>>)
+        case b(AnyViewGraphNode<TransitionHost<B>>)
 
         /// The widget corresponding to the currently displayed child view.
         var widget: AnyWidget {
@@ -155,21 +250,119 @@ class EitherViewChildren<A: View, B: View>: ViewGraphNodeChildren {
                     return ErasedViewGraphNode(wrapping: node)
             }
         }
+
+        func resetAnimationPresentationRecursively() {
+            switch self {
+                case .a(let node):
+                    node.resetAnimationPresentationRecursively()
+                case .b(let node):
+                    node.resetAnimationPresentationRecursively()
+            }
+        }
+
+        func setInsertionStart(
+            transition: AnyTransition,
+            environment: EnvironmentValues
+        ) {
+            switch self {
+                case .a(let node):
+                    TransitionRuntime.setInsertionStart(
+                        node: node,
+                        content: node.getView().content,
+                        transition: transition,
+                        environment: environment
+                    )
+                case .b(let node):
+                    TransitionRuntime.setInsertionStart(
+                        node: node,
+                        content: node.getView().content,
+                        transition: transition,
+                        environment: environment
+                    )
+            }
+        }
+
+        func animateInsertion(
+            transition: AnyTransition,
+            environment: EnvironmentValues
+        ) {
+            switch self {
+                case .a(let node):
+                    TransitionRuntime.animateInsertion(
+                        node: node,
+                        content: node.getView().content,
+                        transition: transition,
+                        environment: environment
+                    )
+                case .b(let node):
+                    TransitionRuntime.animateInsertion(
+                        node: node,
+                        content: node.getView().content,
+                        transition: transition,
+                        environment: environment
+                    )
+            }
+        }
+
+        func animateRemoval(
+            transition: AnyTransition,
+            environment: EnvironmentValues,
+            onComplete: @escaping @MainActor () -> Void
+        ) -> TransitionRuntime.RemovalToken {
+            switch self {
+                case .a(let node):
+                    return TransitionRuntime.animateRemoval(
+                        node: node,
+                        content: node.getView().content,
+                        transition: transition,
+                        environment: environment,
+                        onComplete: onComplete
+                    )
+                case .b(let node):
+                    return TransitionRuntime.animateRemoval(
+                        node: node,
+                        content: node.getView().content,
+                        transition: transition,
+                        environment: environment,
+                        onComplete: onComplete
+                    )
+            }
+        }
+
+        func matches(_ other: EitherNode?) -> Bool {
+            guard let other else {
+                return false
+            }
+            switch (self, other) {
+                case (.a(let lhs), .a(let rhs)):
+                    return lhs === rhs
+                case (.b(let lhs), .b(let rhs)):
+                    return lhs === rhs
+                default:
+                    return false
+            }
+        }
     }
 
     /// The view graph node for the currently displayed child.
     var node: EitherNode
+    /// A node that is currently being removed from the hierarchy.
+    var outgoingNode: EitherNode?
+    var removalToken: TransitionRuntime.RemovalToken?
+    /// The most recent transition advertised by the active child.
+    var transition: AnyTransition = .identity
+    /// Whether the initial child still needs to be inserted into the container.
+    var needsInitialInsertion = true
 
     /// Tracks whether the view has switched cases since the last non-dryrun update.
-    /// Initially `true`.
-    var hasSwitchedCase = true
+    var hasSwitchedCase = false
 
     var widgets: [AnyWidget] {
-        return [node.widget]
+        [outgoingNode?.widget, node.widget].compactMap { $0 }
     }
 
     var erasedNodes: [ErasedViewGraphNode] {
-        [node.erasedNode]
+        [outgoingNode?.erasedNode, node.erasedNode].compactMap { $0 }
     }
 
     /// Creates storage for an either view's current child (which can change at any time).
@@ -188,7 +381,11 @@ class EitherViewChildren<A: View, B: View>: ViewGraphNodeChildren {
             case .a(let a):
                 node = .a(
                     AnyViewGraphNode(
-                        for: a,
+                        for: TransitionHost(
+                            content: a,
+                            transition: .identity,
+                            phase: .identity
+                        ),
                         backend: backend,
                         snapshot: snapshot,
                         environment: environment
@@ -197,7 +394,11 @@ class EitherViewChildren<A: View, B: View>: ViewGraphNodeChildren {
             case .b(let b):
                 node = .b(
                     AnyViewGraphNode(
-                        for: b,
+                        for: TransitionHost(
+                            content: b,
+                            transition: .identity,
+                            phase: .identity
+                        ),
                         backend: backend,
                         snapshot: snapshot,
                         environment: environment

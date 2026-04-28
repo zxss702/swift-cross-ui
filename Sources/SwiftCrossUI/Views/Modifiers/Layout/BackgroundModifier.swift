@@ -105,9 +105,28 @@ struct BackgroundModifier<Background: View, Foreground: View>: TypeSafeView {
             in: frameSize.vector
         )
 
-        backend.setPosition(ofChildAt: 0, in: widget, to: backgroundPosition)
-        backend.setPosition(ofChildAt: 1, in: widget, to: foregroundPosition)
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: widget,
+            child: children.child0.widget.into(),
+            to: ViewFrame(origin: backgroundPosition, size: backgroundSize.vector),
+            environment: environment,
+            backend: backend
+        )
+        AnimationRuntime.setFrame(
+            ofChildAt: 1,
+            in: widget,
+            child: children.child1.widget.into(),
+            to: ViewFrame(origin: foregroundPosition, size: foregroundSize.vector),
+            environment: environment,
+            backend: backend
+        )
 
-        backend.setSize(of: widget, to: frameSize.vector)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: frameSize.vector,
+            environment: environment,
+            backend: backend
+        )
     }
 }

@@ -18,6 +18,7 @@ public struct ErasedViewGraphNode {
     public var commit: () -> ViewLayoutResult
 
     public var getWidget: () -> AnyWidget
+    var resetAnimationPresentation: () -> Void
     public var viewType: any View.Type
     public var backendType: any AppBackend.Type
 
@@ -67,6 +68,7 @@ public struct ErasedViewGraphNode {
         getWidget = {
             return AnyWidget(node.widget)
         }
+        resetAnimationPresentation = node.resetAnimationPresentationRecursively
     }
 
     public init<V: View>(wrapping node: AnyViewGraphNode<V>) {

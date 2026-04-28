@@ -501,7 +501,13 @@ public final class Gtk3Backend: AppBackend {
         )
     }
 
-    private static func runInMainThread(
+    public nonisolated func scheduleAnimationFrame(
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        Self.runInMainThread(afterMilliseconds: 16, action: action)
+    }
+
+    private nonisolated static func runInMainThread(
         afterMilliseconds delay: Int,
         action: @escaping @MainActor @Sendable () -> Void
     ) {
@@ -594,11 +600,17 @@ public final class Gtk3Backend: AppBackend {
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            return
+        }
         container.move(container.children[index], x: position.x, y: position.y)
     }
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            return
+        }
         let child = container.children[index]
         container.remove(child)
     }
@@ -629,6 +641,10 @@ public final class Gtk3Backend: AppBackend {
         widget.css.set(property: .cornerRadius(radius))
     }
 
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = max(0, min(1, opacity))
+    }
+
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
         let currentSize = widget.getSizeRequest()
         widget.setSizeRequest(width: -1, height: -1)
@@ -638,7 +654,7 @@ public final class Gtk3Backend: AppBackend {
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
-        widget.setSizeRequest(width: size.x, height: size.y)
+        widget.setSizeRequest(width: max(0, size.x), height: max(0, size.y))
     }
 
     public func createSplitView(leadingChild: Widget, trailingChild: Widget) -> Widget {

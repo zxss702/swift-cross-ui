@@ -469,7 +469,13 @@ public final class GtkBackend: AppBackend {
         )
     }
 
-    private static func runInMainThread(
+    public nonisolated func scheduleAnimationFrame(
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        Self.runInMainThread(afterMilliseconds: 8, action: action)
+    }
+
+    private nonisolated static func runInMainThread(
         afterMilliseconds delay: Int,
         action: @escaping @MainActor @Sendable () -> Void
     ) {
@@ -544,7 +550,9 @@ public final class GtkBackend: AppBackend {
     // MARK: Containers
 
     public func createContainer() -> Widget {
-        return Fixed()
+        let container = Fixed()
+        container.overflow = .visible
+        return container
     }
 
     public func removeAllChildren(of container: Widget) {
@@ -559,11 +567,17 @@ public final class GtkBackend: AppBackend {
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            return
+        }
         container.move(container.children[index], x: Double(position.x), y: Double(position.y))
     }
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            return
+        }
         let child = container.children[index]
         container.remove(child)
     }
@@ -575,6 +589,11 @@ public final class GtkBackend: AppBackend {
         // end up with unexpected z ordering. If that becomes an issue we may
         // have to make a custom replacement for Gtk.Fixed.
         let container = container as! Fixed
+        guard container.children.indices.contains(firstIndex),
+            container.children.indices.contains(secondIndex)
+        else {
+            return
+        }
         container.children.swapAt(firstIndex, secondIndex)
     }
 
@@ -590,7 +609,35 @@ public final class GtkBackend: AppBackend {
     }
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
+        widget.overflow = .hidden
         widget.css.set(property: .cornerRadius(radius))
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = max(0, min(1, opacity))
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint
+    ) {
+        let transformValue =
+            "translate(\(translation.x)px, \(translation.y)px) rotate(\(rotation.radians)rad) scale(\(scale.x), \(scale.y))"
+        widget.css.set(
+            property: CSSProperty(
+                key: "transform",
+                value: transformValue
+            )
+        )
+        widget.css.set(
+            property: CSSProperty(
+                key: "transform-origin",
+                value: "\(anchor.x * 100)% \(anchor.y * 100)%"
+            )
+        )
     }
 
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
@@ -602,7 +649,7 @@ public final class GtkBackend: AppBackend {
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
-        widget.setSizeRequest(width: size.x, height: size.y)
+        widget.setSizeRequest(width: max(0, size.x), height: max(0, size.y))
     }
 
     public func createSplitView(leadingChild: Widget, trailingChild: Widget) -> Widget {
@@ -1800,6 +1847,7 @@ public final class GtkBackend: AppBackend {
 
     private func wrapInCustomRootContainer(_ widget: Widget) -> Widget {
         let container = CustomRootWidget()
+        container.overflow = .visible
         container.setChild(to: widget)
         return container
     }

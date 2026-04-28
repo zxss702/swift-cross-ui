@@ -21,6 +21,7 @@ A few examples are included with SwiftCrossUI to demonstrate some of its basic f
 - `PathsExample`, an app showcasing the use of ``Path`` to draw various shapes.
 - `WebViewExample`, an app showcasing the use of ``WebView`` to display websites. Only works on Apple platforms so far.
 - `AdvancedCustomizationExample`, an app showcasing SwiftCrossUI's more advanced APIs for customizing the underlying native views of your app.
+- `AnimationExample`, an app showcasing ``withAnimation(_:_:)``, ``View/animation(_:value:)``, ``View/transition(_:)``, ``View/id(_:)``, and built-in animation curves.
 
 ## Running examples
 

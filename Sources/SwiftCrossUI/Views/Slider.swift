@@ -105,6 +105,6 @@ public struct Slider: ElementaryView, View {
             backend.setValue(ofSlider: widget, to: value)
         }
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }

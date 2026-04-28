@@ -16,6 +16,10 @@ public class AnyViewGraphNode<NodeView: View> {
     public var lastProposedSize: ProposedViewSize {
         _getLastProposedSize()
     }
+    /// The node's most recently computed layout.
+    public var currentLayout: ViewLayoutResult? {
+        _getCurrentLayout()
+    }
 
     /// The node's type-erased layout computing method.
     private var _computeLayoutWithNewView:
@@ -26,6 +30,10 @@ public class AnyViewGraphNode<NodeView: View> {
         ) -> ViewLayoutResult
     /// The node's type-erased commit method.
     private var _commit: () -> ViewLayoutResult
+    /// The node's type-erased backend layout flush method.
+    private var _flushLayout: () -> Void
+    /// The node's type-erased animation presentation cleanup method.
+    private var _resetAnimationPresentation: () -> Void
     /// The type-erased getter for the node's widget.
     private var _getWidget: () -> AnyWidget
     /// The type-erased getter for the node's view.
@@ -36,12 +44,16 @@ public class AnyViewGraphNode<NodeView: View> {
     private var _getBackend: () -> any AppBackend
     /// The type-erased getter for the node's last proposed size.
     private var _getLastProposedSize: () -> ProposedViewSize
+    /// The type-erased getter for the node's current layout.
+    private var _getCurrentLayout: () -> ViewLayoutResult?
 
     /// Type-erases a view graph node.
     public init<Backend: AppBackend>(_ node: ViewGraphNode<NodeView, Backend>) {
         self.node = node
         _computeLayoutWithNewView = node.computeLayout(with:proposedSize:environment:)
         _commit = node.commit
+        _flushLayout = node.flushLayout
+        _resetAnimationPresentation = node.resetAnimationPresentationRecursively
         _getWidget = {
             AnyWidget(node.widget)
         }
@@ -56,6 +68,9 @@ public class AnyViewGraphNode<NodeView: View> {
         }
         _getLastProposedSize = {
             node.lastProposedSize
+        }
+        _getCurrentLayout = {
+            node.currentLayout
         }
     }
 
@@ -96,6 +111,14 @@ public class AnyViewGraphNode<NodeView: View> {
     /// view's children. Also commits any view state changes.
     public func commit() -> ViewLayoutResult {
         _commit()
+    }
+
+    func flushLayout() {
+        _flushLayout()
+    }
+
+    func resetAnimationPresentationRecursively() {
+        _resetAnimationPresentation()
     }
 
     /// Gets the node's wrapped view.

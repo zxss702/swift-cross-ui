@@ -88,7 +88,17 @@ extension Color: ElementaryView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        backend.setSize(of: widget, to: layout.size.vector)
-        backend.setColor(ofColorableRectangle: widget, to: self.resolve(in: environment))
+        AnimationRuntime.setSize(
+            of: widget,
+            to: layout.size.vector,
+            environment: environment,
+            backend: backend
+        )
+        AnimationRuntime.setColor(
+            ofColorableRectangle: widget,
+            to: self.resolve(in: environment),
+            environment: environment,
+            backend: backend
+        )
     }
 }

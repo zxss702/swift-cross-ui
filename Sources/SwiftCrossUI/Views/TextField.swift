@@ -137,6 +137,6 @@ public struct TextField: ElementaryView, View {
             backend.setContent(ofTextField: widget, to: text)
         }
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }

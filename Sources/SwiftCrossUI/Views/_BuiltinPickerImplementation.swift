@@ -45,7 +45,6 @@ public struct _BuiltinPickerImplementation: TypeSafeView {
             children.picker = AnyWidget(pickerWidget)
 
             backend.insert(pickerWidget, into: containerWidget, at: 0)
-            backend.setPosition(ofChildAt: 0, in: containerWidget, to: .zero)
         }
 
         // TODO: Implement picker sizing within SwiftCrossUI so that we can
@@ -79,7 +78,14 @@ public struct _BuiltinPickerImplementation: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
+        AnimationRuntime.setPosition(
+            ofChildAt: 0,
+            in: widget,
+            to: .zero,
+            environment: environment,
+            backend: backend
+        )
         backend.setSize(
             of: children.picker!.widget as! Backend.Widget,
             to: layout.size.vector

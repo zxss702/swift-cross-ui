@@ -26,7 +26,7 @@ final class ObservationTrackingState: @unchecked Sendable {
 protocol ViewModelObserver: AnyObject, Sendable {
     var observationTrackingState: ObservationTrackingState { get }
 
-    func viewModelDidChange<Backend: AppBackend>(backend: Backend)
+    func viewModelDidChange<Backend: AppBackend>(backend: Backend, transaction: Transaction)
 }
 
 extension ViewModelObserver {
@@ -37,9 +37,9 @@ extension ViewModelObserver {
         withObservationTrackingIfAvailable(
             state: observationTrackingState,
             apply: computation,
-            onChange: { [weak self, backend] in
+            onChange: { [weak self, backend] transaction in
                 backend.runInMainThread {
-                    self?.viewModelDidChange(backend: backend)
+                    self?.viewModelDidChange(backend: backend, transaction: transaction)
                 }
             }
         )
@@ -50,7 +50,7 @@ extension ViewModelObserver {
 func withObservationTrackingIfAvailable<T>(
     state: ObservationTrackingState,
     apply: () -> T,
-    onChange: @escaping @Sendable () -> Void
+    onChange: @escaping @Sendable (Transaction) -> Void
 ) -> T {
     #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0, *) {
@@ -61,7 +61,10 @@ func withObservationTrackingIfAvailable<T>(
                     guard let state, state.isCurrent(generation) else {
                         return
                     }
-                    onChange()
+                    let transaction = Transaction.current
+                    withTransaction(transaction) {
+                        onChange(transaction)
+                    }
                 }
             )
         }

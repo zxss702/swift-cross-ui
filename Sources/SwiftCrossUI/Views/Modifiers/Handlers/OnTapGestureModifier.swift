@@ -91,7 +91,7 @@ struct OnTapGestureModifier<Content: View>: TypeSafeView {
         backend: Backend
     ) {
         let size = children.child0.commit().size
-        backend.setSize(of: widget, to: size.vector)
+        AnimationRuntime.setSize(of: widget, to: size.vector, environment: environment, backend: backend)
         backend.updateTapGestureTarget(
             widget,
             gesture: gesture,

@@ -98,8 +98,8 @@ public struct GeometryReader<Content: View>: TypeSafeView, View {
         backend: Backend
     ) {
         _ = children.node?.commit()
-        backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setPosition(ofChildAt: 0, in: widget, to: .zero, environment: environment, backend: backend)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }
 

@@ -59,7 +59,7 @@ struct OnHoverModifier<Content: View>: TypeSafeView {
         backend: Backend
     ) {
         let size = children.child0.commit().size.vector
-        backend.setSize(of: widget, to: size)
+        AnimationRuntime.setSize(of: widget, to: size, environment: environment, backend: backend)
         backend.updateHoverTarget(
             widget,
             environment: environment,

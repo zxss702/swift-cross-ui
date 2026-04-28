@@ -234,6 +234,6 @@ struct ProgressBarView: ElementaryView {
         backend: Backend
     ) {
         backend.updateProgressBar(widget, progressFraction: value, environment: environment)
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }

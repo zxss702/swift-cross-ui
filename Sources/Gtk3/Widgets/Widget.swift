@@ -146,7 +146,11 @@ open class Widget: GObject {
     }
 
     open func setSizeRequest(width: Int, height: Int) {
-        gtk_widget_set_size_request(widgetPointer, Int32(width), Int32(height))
+        gtk_widget_set_size_request(
+            widgetPointer,
+            Int32(max(-1, width)),
+            Int32(max(-1, height))
+        )
     }
 
     public func getSizeRequest() -> Size {

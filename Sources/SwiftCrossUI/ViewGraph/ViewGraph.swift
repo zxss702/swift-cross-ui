@@ -82,6 +82,7 @@ public class ViewGraph<Root: View> {
     public func commit() {
         committedProposal = latestProposal
         self.currentRootViewResult = rootNode.commit()
+        rootNode.flushLayout()
         if isFirstUpdate {
             setIncomingURLHandler { url in
                 self.currentRootViewResult.preferences.onOpenURL?(url)

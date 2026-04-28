@@ -95,7 +95,14 @@ struct FixedSizeModifier<Child: View>: TypeSafeView {
             ofChild: childResult.size.vector,
             in: layout.size.vector
         )
-        backend.setPosition(ofChildAt: 0, in: widget, to: childPosition)
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: widget,
+            child: children.child0.widget.into(),
+            to: ViewFrame(origin: childPosition, size: childResult.size.vector),
+            environment: environment,
+            backend: backend
+        )
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }

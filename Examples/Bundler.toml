@@ -87,3 +87,8 @@ version = '0.1.0'
 identifier = 'dev.swiftcrossui.ColorsExample'
 product = 'ColorsExample'
 version = '0.1.0'
+
+[apps.AnimationExample]
+identifier = 'dev.swiftcrossui.AnimationExample'
+product = 'AnimationExample'
+version = '0.1.0'

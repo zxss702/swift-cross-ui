@@ -253,7 +253,7 @@ public struct List<SelectionValue: Hashable, RowView: View>: TypeSafeView, View 
             }
         )
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
         backend.setSelectionHandler(forSelectableListView: widget) { selectedIndex in
             selection.wrappedValue = associatedSelectionValue(selectedIndex)
         }

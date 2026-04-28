@@ -55,6 +55,9 @@ public struct EnvironmentValues {
     /// proposal received by each view must be its intended final proposal.
     var allowLayoutCaching: Bool = false
 
+    /// The transaction currently being used to update the view graph.
+    var transaction: Transaction = Transaction()
+
     /// Backing storage for object-typed environment values.
     private var observableObjects: [ObjectIdentifier: Any]
 

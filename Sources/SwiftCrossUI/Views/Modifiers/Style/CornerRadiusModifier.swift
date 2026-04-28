@@ -68,6 +68,11 @@ struct CornerRadiusModifier<Content: View>: View {
             environment: environment,
             backend: backend
         )
-        backend.setCornerRadius(of: widget, to: cornerRadius)
+        AnimationRuntime.setCornerRadius(
+            of: widget,
+            to: cornerRadius,
+            environment: environment,
+            backend: backend
+        )
     }
 }

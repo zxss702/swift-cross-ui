@@ -1,6 +1,21 @@
 import AppKit
+import QuartzCore
 import SwiftCrossUI
 import WebKit
+
+private func withoutImplicitAnimations(_ updates: () -> Void) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    defer {
+        CATransaction.commit()
+    }
+
+    NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0
+        context.allowsImplicitAnimation = false
+        updates()
+    }
+}
 
 extension App {
     public typealias Backend = AppKitBackend
@@ -276,6 +291,19 @@ public final class AppKitBackend: AppBackend {
         }
     }
 
+    public nonisolated func scheduleAnimationFrame(
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        DispatchQueue.main.async {
+            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    action()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
     public func computeRootEnvironment(defaultEnvironment: EnvironmentValues) -> EnvironmentValues {
         let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         return
@@ -386,6 +414,21 @@ public final class AppKitBackend: AppBackend {
 
     public func show(widget: Widget) {}
 
+    public func flushLayout(of widget: Widget) {
+        widget.needsLayout = true
+        widget.needsUpdateConstraints = true
+
+        if let superview = widget.superview {
+            superview.needsLayout = true
+            superview.needsUpdateConstraints = true
+        }
+
+        if let contentView = widget.window?.contentView, contentView !== widget {
+            contentView.needsLayout = true
+            contentView.needsUpdateConstraints = true
+        }
+    }
+
     public func createContainer() -> Widget {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -397,11 +440,24 @@ public final class AppKitBackend: AppBackend {
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
-        container.subviews.insert(child, at: index)
-        child.translatesAutoresizingMaskIntoConstraints = false
+        withoutImplicitAnimations {
+            if child.superview != nil {
+                child.removeFromSuperview()
+            }
+
+            let insertionIndex = max(0, min(index, container.subviews.count))
+            container.subviews.insert(child, at: insertionIndex)
+            child.translatesAutoresizingMaskIntoConstraints = false
+        }
     }
 
     public func swap(childAt firstIndex: Int, withChildAt secondIndex: Int, in container: NSView) {
+        guard container.subviews.indices.contains(firstIndex),
+            container.subviews.indices.contains(secondIndex)
+        else {
+            return
+        }
+
         assert(
             container.subviews.indices.contains(firstIndex)
                 && container.subviews.indices.contains(secondIndex),
@@ -412,10 +468,16 @@ public final class AppKitBackend: AppBackend {
             """
         )
 
-        container.subviews.swapAt(firstIndex, secondIndex)
+        withoutImplicitAnimations {
+            container.subviews.swapAt(firstIndex, secondIndex)
+        }
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
+        guard container.subviews.indices.contains(index) else {
+            return
+        }
+
         assert(
             container.subviews.indices.contains(index),
             """
@@ -425,47 +487,56 @@ public final class AppKitBackend: AppBackend {
             """
         )
 
-        let child = container.subviews[index]
+        withoutImplicitAnimations {
+            let child = container.subviews[index]
 
-        var foundConstraint = false
-        for constraint in container.constraints {
-            if constraint.firstAnchor === child.leftAnchor
-                && constraint.secondAnchor === container.leftAnchor
-            {
-                constraint.constant = CGFloat(position.x)
-                foundConstraint = true
-                break
+            var foundConstraint = false
+            for constraint in container.constraints {
+                if constraint.firstAnchor === child.leftAnchor
+                    && constraint.secondAnchor === container.leftAnchor
+                {
+                    constraint.constant = CGFloat(position.x)
+                    foundConstraint = true
+                    break
+                }
             }
-        }
 
-        if !foundConstraint {
-            let constraint = child.leftAnchor.constraint(
-                equalTo: container.leftAnchor, constant: CGFloat(position.x)
-            )
-            constraint.isActive = true
-        }
-
-        foundConstraint = false
-        for constraint in container.constraints {
-            if constraint.firstAnchor === child.topAnchor
-                && constraint.secondAnchor === container.topAnchor
-            {
-                constraint.constant = CGFloat(position.y)
-                foundConstraint = true
-                break
+            if !foundConstraint {
+                let constraint = child.leftAnchor.constraint(
+                    equalTo: container.leftAnchor,
+                    constant: CGFloat(position.x)
+                )
+                constraint.isActive = true
             }
-        }
 
-        if !foundConstraint {
-            child.topAnchor.constraint(
-                equalTo: container.topAnchor,
-                constant: CGFloat(position.y)
-            ).isActive = true
+            foundConstraint = false
+            for constraint in container.constraints {
+                if constraint.firstAnchor === child.topAnchor
+                    && constraint.secondAnchor === container.topAnchor
+                {
+                    constraint.constant = CGFloat(position.y)
+                    foundConstraint = true
+                    break
+                }
+            }
+
+            if !foundConstraint {
+                child.topAnchor.constraint(
+                    equalTo: container.topAnchor,
+                    constant: CGFloat(position.y)
+                ).isActive = true
+            }
         }
     }
 
     public func remove(childAt index: Int, from container: Widget) {
-        container.subviews.remove(at: index)
+        guard container.subviews.indices.contains(index) else {
+            return
+        }
+
+        withoutImplicitAnimations {
+            container.subviews[index].removeFromSuperview()
+        }
     }
 
     public func createColorableRectangle() -> Widget {
@@ -475,13 +546,80 @@ public final class AppKitBackend: AppBackend {
     }
 
     public func setColor(ofColorableRectangle widget: Widget, to color: Color.Resolved) {
-        widget.layer?.backgroundColor = color.nsColor.cgColor
+        withoutImplicitAnimations {
+            widget.layer?.backgroundColor = color.nsColor.cgColor
+        }
     }
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
-        widget.clipsToBounds = true
-        widget.wantsLayer = true
-        widget.layer?.cornerRadius = CGFloat(radius)
+        withoutImplicitAnimations {
+            widget.clipsToBounds = true
+            widget.wantsLayer = true
+            widget.layer?.cornerRadius = CGFloat(max(0, radius))
+        }
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        withoutImplicitAnimations {
+            widget.alphaValue = CGFloat(max(0, min(1, opacity)))
+        }
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint,
+        bounds: SIMD2<Int>?
+    ) {
+        withoutImplicitAnimations {
+            widget.wantsLayer = true
+            guard let layer = widget.layer else {
+                return
+            }
+
+            layer.masksToBounds = false
+            layer.sublayerTransform = CATransform3DIdentity
+
+            let size = bounds.map {
+                SIMD2(Double($0.x), Double($0.y))
+            } ?? SIMD2(Double(widget.bounds.width), Double(widget.bounds.height))
+            let anchorPosition = SIMD2(size.x * anchor.x, size.y * anchor.y)
+            let centerPosition = SIMD2(size.x * 0.5, size.y * 0.5)
+            let offset = anchorPosition - centerPosition
+            let sine = sin(rotation.radians)
+            let cosine = cos(rotation.radians)
+            let a = cosine * scale.x
+            let b = sine * scale.x
+            let c = -sine * scale.y
+            let d = cosine * scale.y
+            let compensatedTranslation = SIMD2(
+                translation.x + offset.x - a * offset.x - c * offset.y,
+                translation.y + offset.y - b * offset.x - d * offset.y
+            )
+
+            layer.transform = CATransform3DConcat(
+                CATransform3DMakeTranslation(
+                    CGFloat(compensatedTranslation.x),
+                    CGFloat(-compensatedTranslation.y),
+                    0
+                ),
+                CATransform3DConcat(
+                    CATransform3DMakeRotation(
+                        CGFloat(-rotation.radians),
+                        0,
+                        0,
+                        1
+                    ),
+                    CATransform3DMakeScale(
+                        CGFloat(scale.x),
+                        CGFloat(scale.y),
+                        1
+                    )
+                )
+            )
+        }
     }
 
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
@@ -506,40 +644,46 @@ public final class AppKitBackend: AppBackend {
     }
 
     func setSize(of widget: Widget, to proposedSize: ProposedViewSize) {
-        var foundConstraint = false
-        for constraint in widget.constraints {
-            if constraint.firstAnchor === widget.widthAnchor {
-                if let proposedWidth = proposedSize.width {
-                    constraint.constant = CGFloat(proposedWidth)
-                    constraint.isActive = true
-                } else {
-                    constraint.isActive = false
+        withoutImplicitAnimations {
+            var foundConstraint = false
+            for constraint in widget.constraints {
+                if constraint.firstAnchor === widget.widthAnchor {
+                    if let proposedWidth = proposedSize.width {
+                        constraint.constant = CGFloat(max(0, proposedWidth))
+                        constraint.isActive = true
+                    } else {
+                        constraint.isActive = false
+                    }
+                    foundConstraint = true
+                    break
                 }
-                foundConstraint = true
-                break
             }
-        }
 
-        if !foundConstraint, let proposedWidth = proposedSize.width {
-            widget.widthAnchor.constraint(equalToConstant: proposedWidth).isActive = true
-        }
+            if !foundConstraint, let proposedWidth = proposedSize.width {
+                widget.widthAnchor.constraint(
+                    equalToConstant: CGFloat(max(0, proposedWidth))
+                ).isActive = true
+            }
 
-        foundConstraint = false
-        for constraint in widget.constraints {
-            if constraint.firstAnchor === widget.heightAnchor {
-                if let proposedHeight = proposedSize.height {
-                    constraint.constant = CGFloat(proposedHeight)
-                    constraint.isActive = true
-                } else {
-                    constraint.isActive = false
+            foundConstraint = false
+            for constraint in widget.constraints {
+                if constraint.firstAnchor === widget.heightAnchor {
+                    if let proposedHeight = proposedSize.height {
+                        constraint.constant = CGFloat(max(0, proposedHeight))
+                        constraint.isActive = true
+                    } else {
+                        constraint.isActive = false
+                    }
+                    foundConstraint = true
+                    break
                 }
-                foundConstraint = true
-                break
             }
-        }
 
-        if !foundConstraint, let proposedHeight = proposedSize.height {
-            widget.heightAnchor.constraint(equalToConstant: proposedHeight).isActive = true
+            if !foundConstraint, let proposedHeight = proposedSize.height {
+                widget.heightAnchor.constraint(
+                    equalToConstant: CGFloat(max(0, proposedHeight))
+                ).isActive = true
+            }
         }
     }
     

@@ -133,7 +133,7 @@ extension Menu: TypeSafeView {
         backend: Backend
     ) {
         let size = layout.size
-        backend.setSize(of: widget, to: size.vector)
+        AnimationRuntime.setSize(of: widget, to: size.vector, environment: environment, backend: backend)
 
         switch backend.menuImplementationStyle {
             case .dynamicPopover:

@@ -162,13 +162,25 @@ struct PaddingModifierView<Child: View>: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        _ = children.child0.commit()
+        let childResult = children.child0.commit()
 
         let size = layout.size
-        backend.setSize(of: container, to: size.vector)
+        AnimationRuntime.setSize(
+            of: container,
+            to: size.vector,
+            environment: environment,
+            backend: backend
+        )
 
         let insets = EdgeInsets(insets, defaultAmount: backend.defaultPaddingAmount)
         let childPosition = SIMD2(insets.leading, insets.top)
-        backend.setPosition(ofChildAt: 0, in: container, to: childPosition)
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: container,
+            child: children.child0.widget.into(),
+            to: ViewFrame(origin: childPosition, size: childResult.size.vector),
+            environment: environment,
+            backend: backend
+        )
     }
 }

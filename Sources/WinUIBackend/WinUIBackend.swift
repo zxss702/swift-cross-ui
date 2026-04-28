@@ -328,6 +328,17 @@ public final class WinUIBackend: AppBackend {
         }
     }
 
+    public nonisolated func scheduleAnimationFrame(
+        action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 16_666_667)
+            runInMainThread {
+                action()
+            }
+        }
+    }
+
     public func show(widget _: Widget) {}
 
     private func renderMenuItem(
@@ -526,6 +537,28 @@ public final class WinUIBackend: AppBackend {
         clip.geometry = geometry
 
         visual.clip = clip
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = max(0, min(1, opacity))
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint,
+        bounds: SIMD2<Int>?
+    ) {
+        let transform = CompositeTransform()
+        transform.scaleX = scale.x
+        transform.scaleY = scale.y
+        transform.rotation = rotation.degrees
+        transform.translateX = translation.x
+        transform.translateY = translation.y
+        widget.renderTransformOrigin = WindowsFoundation.Point(x: anchor.x, y: anchor.y)
+        widget.renderTransform = transform
     }
 
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {

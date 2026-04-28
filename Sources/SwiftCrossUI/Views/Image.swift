@@ -155,7 +155,7 @@ extension Image: TypeSafeView {
                         into: children.container.into(),
                         at: 0
                     )
-                    backend.setPosition(ofChildAt: 0, in: children.container.into(), to: .zero)
+                    AnimationRuntime.setPosition(ofChildAt: 0, in: children.container.into(), to: .zero, environment: environment, backend: backend)
                 }
                 children.isContainerEmpty = false
             } else {
@@ -165,8 +165,8 @@ extension Image: TypeSafeView {
             children.imageChanged = false
             children.lastScaleFactor = environment.windowScaleFactor
         }
-        backend.setSize(of: children.container.into(), to: size)
-        backend.setSize(of: children.imageWidget.into(), to: size)
+        AnimationRuntime.setSize(of: children.container.into(), to: size, environment: environment, backend: backend)
+        AnimationRuntime.setSize(of: children.imageWidget.into(), to: size, environment: environment, backend: backend)
     }
 }
 

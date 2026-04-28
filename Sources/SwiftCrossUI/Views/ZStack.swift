@@ -67,19 +67,41 @@ public struct ZStack<Content: View>: View {
         backend: Backend
     ) {
         let size = layout.size
-        let children = layoutableChildren(backend: backend, children: children)
-            .map { child in
-                child.commit()
-            }
+        let layoutableChildren = layoutableChildren(backend: backend, children: children)
+        let committedChildren = layoutableChildren.map { child in
+            child.commit()
+        }
 
-        for (i, child) in children.enumerated() {
+        for (i, child) in committedChildren.enumerated() {
             let position = alignment.position(
                 ofChild: child.size.vector,
                 in: size.vector
             )
-            backend.setPosition(ofChildAt: i, in: widget, to: position)
+            if let childWidget: Backend.Widget = layoutableChildren[i].widget?.into() {
+                AnimationRuntime.setFrame(
+                    ofChildAt: i,
+                    in: widget,
+                    child: childWidget,
+                    to: ViewFrame(origin: position, size: child.size.vector),
+                    environment: environment,
+                    backend: backend
+                )
+            } else {
+                AnimationRuntime.setPosition(
+                    ofChildAt: i,
+                    in: widget,
+                    to: position,
+                    environment: environment,
+                    backend: backend
+                )
+            }
         }
 
-        backend.setSize(of: widget, to: size.vector)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: size.vector,
+            environment: environment,
+            backend: backend
+        )
     }
 }

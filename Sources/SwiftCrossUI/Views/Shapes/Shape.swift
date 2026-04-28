@@ -116,7 +116,12 @@ extension Shape {
             environment: environment
         )
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: layout.size.vector,
+            environment: environment,
+            backend: backend
+        )
         backend.renderPath(
             backendPath,
             container: widget,

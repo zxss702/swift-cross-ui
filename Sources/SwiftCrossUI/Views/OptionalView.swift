@@ -51,20 +51,32 @@ extension OptionalView: TypeSafeView {
         if let view {
             if let node = children.node {
                 result = node.computeLayout(
-                    with: view,
+                    with: TransitionHost(
+                        content: view,
+                        transition: children.transition,
+                        phase: .identity
+                    ),
                     proposedSize: proposedSize,
                     environment: environment
                 )
                 hasToggled = false
             } else {
                 let node = AnyViewGraphNode(
-                    for: view,
+                    for: TransitionHost(
+                        content: view,
+                        transition: children.transition,
+                        phase: .identity
+                    ),
                     backend: backend,
                     environment: environment
                 )
                 children.node = node
                 result = node.computeLayout(
-                    with: view,
+                    with: TransitionHost(
+                        content: view,
+                        transition: children.transition,
+                        phase: .identity
+                    ),
                     proposedSize: proposedSize,
                     environment: environment
                 )
@@ -72,10 +84,16 @@ extension OptionalView: TypeSafeView {
             }
         } else {
             hasToggled = children.node != nil
+            if hasToggled {
+                children.outgoingNode = children.node
+            }
             children.node = nil
             result = ViewLayoutResult.leafView(size: .zero)
         }
         children.hasToggled = children.hasToggled || hasToggled
+        if let transition = result.preferences.transition {
+            children.transition = transition
+        }
 
         return result
     }
@@ -87,18 +105,99 @@ extension OptionalView: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        if children.hasToggled {
+        let didToggle = children.hasToggled
+        let didInsertInitial = children.needsInitialInsertion
+        let transition = layout.preferences.transition ?? children.transition
+        if didInsertInitial {
             backend.removeAllChildren(of: widget)
             if let node = children.node {
+                _ = node.commit()
                 backend.insert(node.widget.into(), into: widget, at: 0)
-                backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+                AnimationRuntime.setPosition(
+                    ofChildAt: 0,
+                    in: widget,
+                    to: .zero,
+                    environment: environment,
+                    backend: backend
+                )
+            }
+            children.needsInitialInsertion = false
+            children.hasToggled = false
+            children.outgoingNode = nil
+        } else if didToggle {
+            backend.removeAllChildren(of: widget)
+            if let outgoingNode = children.outgoingNode {
+                backend.insert(outgoingNode.widget.into(), into: widget, at: 0)
+                _ = outgoingNode.commit()
+                AnimationRuntime.setPosition(
+                    ofChildAt: 0,
+                    in: widget,
+                    to: .zero,
+                    environment: environment,
+                    backend: backend
+                )
+                children.removalToken = TransitionRuntime.animateRemoval(
+                    node: outgoingNode,
+                    content: outgoingNode.getView().content,
+                    transition: transition,
+                    environment: environment
+                ) { [weak children] in
+                    guard let children, children.outgoingNode === outgoingNode else {
+                        return
+                    }
+                    outgoingNode.resetAnimationPresentationRecursively()
+                    backend.removeAllChildren(of: widget)
+                    if let node = children.node {
+                        backend.insert(node.widget.into(), into: widget, at: 0)
+                        AnimationRuntime.setPosition(
+                            ofChildAt: 0,
+                            in: widget,
+                            to: .zero,
+                            environment: environment,
+                            backend: backend
+                        )
+                    }
+                    children.outgoingNode = nil
+                    children.removalToken = nil
+                }
+            }
+            if let node = children.node {
+                let index = children.outgoingNode == nil ? 0 : 1
+                _ = node.commit()
+                TransitionRuntime.setInsertionStart(
+                    node: node,
+                    content: node.getView().content,
+                    transition: transition,
+                    environment: environment
+                )
+                backend.insert(node.widget.into(), into: widget, at: index)
+                AnimationRuntime.setPosition(
+                    ofChildAt: index,
+                    in: widget,
+                    to: .zero,
+                    environment: environment,
+                    backend: backend
+                )
+                TransitionRuntime.animateInsertion(
+                    node: node,
+                    content: node.getView().content,
+                    transition: transition,
+                    environment: environment
+                )
             }
             children.hasToggled = false
         }
 
-        _ = children.node?.commit()
+        if !didToggle && !didInsertInitial {
+            _ = children.node?.commit()
+        }
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: layout.size.vector,
+            environment: environment,
+            backend: backend
+        )
     }
 }
 
@@ -106,21 +205,25 @@ extension OptionalView: TypeSafeView {
 /// the child has toggled since last time the parent was updated or not.
 class OptionalViewChildren<V: View>: ViewGraphNodeChildren {
     /// The view graph node for the view's child if present.
-    var node: AnyViewGraphNode<V>?
-    /// Whether the view has toggled since the last non-dryrun update. `true`
-    /// if the first view update hasn't occurred yet.
-    var hasToggled = true
+    var node: AnyViewGraphNode<TransitionHost<V>>?
+    /// A node that is currently being removed from the hierarchy.
+    var outgoingNode: AnyViewGraphNode<TransitionHost<V>>?
+    var removalToken: TransitionRuntime.RemovalToken?
+    /// The most recent transition advertised by the child.
+    var transition: AnyTransition = .identity
+    /// Whether the initial child still needs to be inserted into the container.
+    var needsInitialInsertion: Bool
+    /// Whether the view has toggled since the last non-dryrun update.
+    var hasToggled = false
 
     var widgets: [AnyWidget] {
-        return [node?.widget].compactMap { $0 }
+        return [outgoingNode?.widget, node?.widget].compactMap { $0 }
     }
 
     var erasedNodes: [ErasedViewGraphNode] {
-        if let node {
-            [ErasedViewGraphNode(wrapping: node)]
-        } else {
-            []
-        }
+        [outgoingNode.map(ErasedViewGraphNode.init(wrapping:)),
+            node.map(ErasedViewGraphNode.init(wrapping:))]
+            .compactMap { $0 }
     }
 
     /// Creates storage for an optional view's child if present (which can change at
@@ -133,11 +236,18 @@ class OptionalViewChildren<V: View>: ViewGraphNodeChildren {
     ) {
         if let view {
             node = AnyViewGraphNode(
-                for: view,
+                for: TransitionHost(
+                    content: view,
+                    transition: .identity,
+                    phase: .identity
+                ),
                 backend: backend,
                 snapshot: snapshot,
                 environment: environment
             )
+            needsInitialInsertion = true
+        } else {
+            needsInitialInsertion = false
         }
     }
 }

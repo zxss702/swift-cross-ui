@@ -17,6 +17,7 @@ private func layoutableChild<V: View>(
         commit: {
             node.commit()
         },
+        widget: node.widget,
         tag: "\(type(of: view))"
     )
 }

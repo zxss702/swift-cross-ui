@@ -42,7 +42,7 @@ the backend is ready. The rest of the setup phase involves:
 - Instantiating any ``Environment`` properties on the app struct via
   `updateDynamicProperties(of:previousValue:environment:)`
 - Observing any ``State`` properties on the app struct using `Mirror` and
-  `observeAsUIUpdater(backend:action:)` (which handles basic update debouncing)
+  scheduling invalidated updates through `ViewUpdateScheduler`
 - Creating the root scene graph node
 - Listening for environment changes (e.g. system theme changes)
 - Updating the root scene graph node
@@ -102,6 +102,12 @@ updates happen when a view's child updated due to a state change _and_ the child
 changed size due to that update. Bottom-up updates continue propagating upwards
 until a view doesn't change size (meaning that we can avoid notifying its
 parent).
+
+State and Observation changes do not refresh the graph immediately. Each
+``ViewGraphNode`` records an invalidation with its current ``Transaction`` and
+`ViewUpdateScheduler` flushes the latest pending update on the next backend UI
+turn. This keeps multiple mutations made in one user action inside one coherent
+transaction.
 
 ### The View protocol
 

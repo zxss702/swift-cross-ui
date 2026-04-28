@@ -93,9 +93,28 @@ struct OverlayModifier<Content: View, Overlay: View>: TypeSafeView {
         let contentPosition = alignment.position(ofChild: contentSize, in: frameSize)
         let overlayPosition = alignment.position(ofChild: overlaySize, in: frameSize)
 
-        backend.setPosition(ofChildAt: 0, in: widget, to: contentPosition)
-        backend.setPosition(ofChildAt: 1, in: widget, to: overlayPosition)
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: widget,
+            child: children.child0.widget.into(),
+            to: ViewFrame(origin: contentPosition, size: contentSize),
+            environment: environment,
+            backend: backend
+        )
+        AnimationRuntime.setFrame(
+            ofChildAt: 1,
+            in: widget,
+            child: children.child1.widget.into(),
+            to: ViewFrame(origin: overlayPosition, size: overlaySize),
+            environment: environment,
+            backend: backend
+        )
 
-        backend.setSize(of: widget, to: frameSize)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: frameSize,
+            environment: environment,
+            backend: backend
+        )
     }
 }

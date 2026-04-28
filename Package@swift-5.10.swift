@@ -28,9 +28,12 @@ if let version = getGtk4MinorVersion(), version >= 10 {
 
 let env = ProcessInfo.processInfo.environment
 let defaultBackendDependencies: [Target.Dependency]
+let defaultBackendSwiftSettings: [SwiftSetting]
 if let backend = env["SCUI_DEFAULT_BACKEND"] {
     defaultBackendDependencies = [.target(name: backend)]
+    defaultBackendSwiftSettings = [.define("SCUI_DEFAULT_BACKEND_\(backend)")]
 } else {
+    defaultBackendSwiftSettings = []
     // With no #if here, Windows and Linux dependencies are also compiled when building for
     // UIKit platforms.
     #if os(macOS)
@@ -207,7 +210,8 @@ let package = Package(
         .target(name: "SwiftCrossUIMetadataSupport"),
         .target(
             name: "DefaultBackend",
-            dependencies: defaultBackendDependencies
+            dependencies: defaultBackendDependencies,
+            swiftSettings: defaultBackendSwiftSettings
         ),
         .target(name: "AppKitBackend", dependencies: ["SwiftCrossUI"]),
         .target(

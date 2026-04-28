@@ -191,6 +191,30 @@ extension UIKitBackend {
         widget.view.layer.masksToBounds = true
     }
 
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.view.alpha = CGFloat(opacity)
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        scale: SIMD2<Double>,
+        translation: SIMD2<Double>,
+        rotation: Angle,
+        anchor: UnitPoint
+    ) {
+        let bounds = widget.view.bounds
+        let anchorOffset = SIMD2(
+            Double(bounds.width) * (anchor.x - 0.5) * (1 - scale.x),
+            Double(bounds.height) * (anchor.y - 0.5) * (1 - scale.y)
+        )
+        widget.view.transform = CGAffineTransform(
+            translationX: translation.x + anchorOffset.x,
+            y: translation.y + anchorOffset.y
+        )
+        .rotated(by: rotation.radians)
+        .scaledBy(x: scale.x, y: scale.y)
+    }
+
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
         let size = widget.view.intrinsicContentSize
         return SIMD2(

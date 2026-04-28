@@ -69,6 +69,6 @@ extension Button: ElementaryView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }

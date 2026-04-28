@@ -44,6 +44,6 @@ public struct WebView: ElementaryView {
             currentURL = destination
             url = destination
         }
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }

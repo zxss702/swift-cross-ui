@@ -6,7 +6,7 @@ public class Publisher {
     /// The id for the next observation (ids are used to cancel observations).
     private var nextObservationId = 0
     /// All current observations keyed by their id (ids are used to cancel observations).
-    private var observations: [Int: () -> Void] = [:]
+    private var observations: [Int: (Transaction) -> Void] = [:]
     /// Human-readable tag for debugging purposes.
     private var tag: String?
 
@@ -31,14 +31,19 @@ public class Publisher {
     public init() {}
 
     /// Publishes a change to all observers serially on the current thread.
-    public func send() {
+    public func send(transaction: Transaction = Transaction.current) {
         for observation in self.observations.values {
-            observation()
+            observation(transaction)
         }
     }
 
     /// Registers a handler to observe future events.
     public func observe(with closure: @escaping () -> Void) -> Cancellable {
+        observe { _ in closure() }
+    }
+
+    /// Registers a handler to observe future events with their originating transaction.
+    public func observe(with closure: @escaping (Transaction) -> Void) -> Cancellable {
         let id = nextObservationId
         observations[id] = closure
         nextObservationId += 1
@@ -53,8 +58,8 @@ public class Publisher {
     /// Links the publisher to an upstream, meaning that observations from the upstream
     /// effectively get forwarded to all observers of this publisher as well.
     public func link(toUpstream publisher: Publisher) -> Cancellable {
-        let cancellable = publisher.observe(with: {
-            self.send()
+        let cancellable = publisher.observe(with: { transaction in
+            self.send(transaction: transaction)
         })
         cancellable.tag(with: "\(tag ?? "no tag") <-> \(cancellable.tag ?? "no tag")")
         return cancellable
@@ -98,10 +103,19 @@ public class Publisher {
         backend: Backend,
         action: @escaping @MainActor @Sendable () -> Void
     ) -> Cancellable {
+        observeAsUIUpdater(backend: backend) { _ in
+            action()
+        }
+    }
+
+    func observeAsUIUpdater<Backend: AppBackend>(
+        backend: Backend,
+        action: @escaping @MainActor @Sendable (Transaction) -> Void
+    ) -> Cancellable {
         let semaphore = self.semaphore
         let serialUpdateHandlingQueue = self.serialUpdateHandlingQueue
         let updateStatistics = self.updateStatistics
-        return observe {
+        return observe { transaction in
             // Only allow one update to wait at a time.
             guard semaphore.wait(timeout: .now()) == .success else {
                 // It's a bit of a hack but we just reuse the serial update handling queue
@@ -129,7 +143,7 @@ public class Publisher {
                     // Run the closure and while we're at it measure how long it takes
                     // so that we can use it when throttling if updates start backing up.
                     let start = ProcessInfo.processInfo.systemUptime
-                    action()
+                    action(transaction)
                     let elapsed = ProcessInfo.processInfo.systemUptime - start
 
                     // I chose exponential smoothing because it's simple to compute, doesn't

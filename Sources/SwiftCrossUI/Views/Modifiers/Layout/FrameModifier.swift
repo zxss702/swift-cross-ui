@@ -177,8 +177,20 @@ struct StrictFrameView<Child: View>: TypeSafeView {
             ofChild: childSize.vector,
             in: frameSize.vector
         )
-        backend.setSize(of: widget, to: frameSize.vector)
-        backend.setPosition(ofChildAt: 0, in: widget, to: childPosition)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: frameSize.vector,
+            environment: environment,
+            backend: backend
+        )
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: widget,
+            child: children.child0.widget.into(),
+            to: ViewFrame(origin: childPosition, size: childSize.vector),
+            environment: environment,
+            backend: backend
+        )
     }
 }
 
@@ -347,7 +359,19 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
             ofChild: childSize.vector,
             in: frameSize.vector
         )
-        backend.setSize(of: widget, to: frameSize.vector)
-        backend.setPosition(ofChildAt: 0, in: widget, to: childPosition)
+        AnimationRuntime.setSize(
+            of: widget,
+            to: frameSize.vector,
+            environment: environment,
+            backend: backend
+        )
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: widget,
+            child: children.child0.widget.into(),
+            to: ViewFrame(origin: childPosition, size: childSize.vector),
+            environment: environment,
+            backend: backend
+        )
     }
 }

@@ -69,6 +69,7 @@ public struct AnyView: TypeSafeView {
         // view graph node for the new view.
         if !viewTypesMatched {
             children.widgetNeedsReinsertion = true
+            children.node.resetAnimationPresentation()
             children.node = ErasedViewGraphNode(
                 for: child,
                 backend: backend,
@@ -98,13 +99,21 @@ public struct AnyView: TypeSafeView {
         if children.widgetNeedsReinsertion {
             backend.remove(childAt: 0, from: widget)
             backend.insert(children.node.getWidget().into(), into: widget, at: 0)
-            backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+            AnimationRuntime.setPosition(ofChildAt: 0, in: widget, to: .zero, environment: environment, backend: backend)
             children.widgetNeedsReinsertion = false
         }
 
-        _ = children.node.commit()
+        let childResult = children.node.commit()
+        AnimationRuntime.setFrame(
+            ofChildAt: 0,
+            in: widget,
+            child: children.node.getWidget().into(),
+            to: ViewFrame(origin: .zero, size: childResult.size.vector),
+            environment: environment,
+            backend: backend
+        )
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }
 

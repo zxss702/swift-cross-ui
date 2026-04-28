@@ -83,6 +83,6 @@ public struct TextEditor: ElementaryView {
             backend.setContent(ofTextEditor: widget, to: content)
         }
 
-        backend.setSize(of: widget, to: layout.size.vector)
+        AnimationRuntime.setSize(of: widget, to: layout.size.vector, environment: environment, backend: backend)
     }
 }
