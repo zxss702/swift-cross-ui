@@ -241,6 +241,12 @@ public final class UIKitBackend:
         DispatchQueue.main.async(execute: action)
     }
 
+    public nonisolated var preferredFramesPerSecond: Double {
+        MainActor.assumeIsolated {
+            Double(max(UIScreen.main.maximumFramesPerSecond, 1))
+        }
+    }
+
     public func show(widget: Widget) {
     }
 
