@@ -139,7 +139,9 @@ public final class GtkBackend: AppBackend {
 
     private static func mainRunLoopTicklingLoop(nextDelayMilliseconds: Int? = nil) {
         Self.runInMainThread(afterMilliseconds: nextDelayMilliseconds ?? 50) {
+            // This performs one pass through the run loop
             let nextDate = RunLoop.main.limitDate(forMode: .default)
+
             // This isn't expected to be nil, but if it is we can just loop
             // again quickly with the default delay.
             let nextDelay = nextDate.map {
@@ -454,10 +456,11 @@ public final class GtkBackend: AppBackend {
                     fatalError("Gtk action callback called without context")
                 }
 
+                let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
+                    .takeUnretainedValue()
+                let innerAction = action.action
                 MainActor.assumeIsolated {
-                    let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
-                        .takeUnretainedValue()
-                    action.action()
+                    innerAction()
                 }
 
                 return 0
@@ -469,7 +472,7 @@ public final class GtkBackend: AppBackend {
 
     private static func runInMainThread(
         afterMilliseconds delay: Int,
-        action: @escaping () -> Void
+        action: @escaping @MainActor () -> Void
     ) {
         let action = ThreadActionContext(action: action)
         g_timeout_add_full(
@@ -480,10 +483,11 @@ public final class GtkBackend: AppBackend {
                     fatalError("Gtk action callback called without context")
                 }
 
+                let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
+                    .takeUnretainedValue()
+                let innerAction = action.action
                 MainActor.assumeIsolated {
-                    let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
-                        .takeUnretainedValue()
-                    action.action()
+                    innerAction()
                 }
 
                 // Cancel the recurring timeout after one iteration
@@ -499,7 +503,7 @@ public final class GtkBackend: AppBackend {
             .with(\.appPhase, windows.contains(where: \.isActive) ? .active : .inactive)
     }
 
-    public func setRootEnvironmentChangeHandler(to action: @escaping () -> Void) {
+    public func setRootEnvironmentChangeHandler(to action: @escaping @Sendable @MainActor () -> Void) {
         // TODO: React to theme changes
         self.rootEnvironmentChangeHandler = action
     }
@@ -515,7 +519,7 @@ public final class GtkBackend: AppBackend {
 
     public func setWindowEnvironmentChangeHandler(
         of window: Window,
-        to action: @escaping () -> Void
+        to action: @escaping @Sendable @MainActor () -> Void
     ) {
         // TODO: Notify when window scale factor changes
     }

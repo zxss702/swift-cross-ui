@@ -359,7 +359,7 @@ public final class DummyBackend: AppBackend {
             .with(\.appPhase, appPhase)
     }
 
-    public func setRootEnvironmentChangeHandler(to action: @escaping () -> Void) {}
+    public func setRootEnvironmentChangeHandler(to action: @escaping @Sendable @MainActor () -> Void) {}
 
     public func computeWindowEnvironment(window: Window, rootEnvironment: EnvironmentValues)
         -> EnvironmentValues
@@ -369,7 +369,7 @@ public final class DummyBackend: AppBackend {
     }
 
     public func setWindowEnvironmentChangeHandler(
-        of window: Window, to action: @escaping () -> Void
+        of window: Window, to action: @escaping @Sendable @MainActor () -> Void
     ) {}
 
     public func setIncomingURLHandler(to action: @escaping (URL) -> Void) {
