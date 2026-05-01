@@ -29,9 +29,28 @@ protocol ViewModelObserver: AnyObject, Sendable {
     ///
     /// - Parameter backend: The backend passed to the last call to `observe()`.
     func viewModelDidChange<Backend: AppBackend>(backend: Backend)
+
+    /// Enqueues an observed model change into the owning graph's transaction
+    /// queue. Implementations that own a graph should override this instead of
+    /// running a layout update directly on the backend main thread.
+    func enqueueObservedChange<Backend: AppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    )
 }
 
 extension ViewModelObserver {
+    func enqueueObservedChange<Backend: AppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    ) {
+        withTransaction(transaction) {
+            StateMutationContext.withTransaction(transaction) {
+                self.viewModelDidChange(backend: backend)
+            }
+        }
+    }
+
     /// Performs a computation and tracks accesses to properties of objects conforming to
     /// `Observable` or `Perceptible` inside the computation. The next time one of those
     /// properties changes, `viewModelDidChange()` will be called.
@@ -50,16 +69,27 @@ extension ViewModelObserver {
         in backend: Backend,
         _ computation: () -> Result
     ) -> Result {
+        if RenderFrameContext.isRendering {
+            return computation()
+        }
+
         let perceptionTrackingID = UUID()
         self.currentViewModelObservationID = perceptionTrackingID
         return withPerceptionTracking {
-            computation()
+            GraphUpdateContext.withUpdating {
+                computation()
+            }
         } onChange: { [backend, weak self] in
+            let transaction = StateMutationContext.currentTransaction
+                .overlaid(by: TransactionContext.current)
             backend.runInMainThread {
                 guard
                     self?.currentViewModelObservationID == perceptionTrackingID
                 else { return }
-                self?.viewModelDidChange(backend: backend)
+                self?.enqueueObservedChange(
+                    backend: backend,
+                    transaction: transaction
+                )
             }
         }
     }
