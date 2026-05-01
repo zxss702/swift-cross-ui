@@ -1,4 +1,5 @@
 import CGtk
+import Dispatch
 import Foundation
 import Gtk
 import SwiftCrossUI
@@ -557,7 +558,9 @@ public final class GtkBackend:
     // MARK: Containers
 
     public func createContainer() -> Widget {
-        return Fixed()
+        let container = Fixed()
+        container.overflow = .visible
+        return container
     }
 
     public func removeAllChildren(of container: Widget) {
@@ -567,16 +570,25 @@ public final class GtkBackend:
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         let container = container as! Fixed
+        let index = min(max(index, 0), container.children.count)
         container.put(child, index: index, x: 0, y: 0)
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            logger.warning("attempted to set position of non-existent container child")
+            return
+        }
         container.move(container.children[index], x: Double(position.x), y: Double(position.y))
     }
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            logger.warning("attempted to remove non-existent container child")
+            return
+        }
         let child = container.children[index]
         container.remove(child)
     }
@@ -588,6 +600,12 @@ public final class GtkBackend:
         // end up with unexpected z ordering. If that becomes an issue we may
         // have to make a custom replacement for Gtk.Fixed.
         let container = container as! Fixed
+        guard container.children.indices.contains(firstIndex),
+            container.children.indices.contains(secondIndex)
+        else {
+            logger.warning("attempted to swap container child out of bounds")
+            return
+        }
         container.children.swapAt(firstIndex, secondIndex)
     }
 
@@ -603,6 +621,7 @@ public final class GtkBackend:
     }
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
+        widget.overflow = radius > 0 ? .hidden : .visible
         widget.css.set(property: .cornerRadius(radius))
     }
 
@@ -615,7 +634,50 @@ public final class GtkBackend:
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
-        widget.setSizeRequest(width: size.x, height: size.y)
+        widget.setSizeRequest(width: max(size.x, 0), height: max(size.y, 0))
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = min(max(opacity, 0), 1)
+    }
+
+    public func setTransform(of widget: Widget, to transform: SwiftCrossUI.AffineTransform) {
+        widget.overflow = .visible
+        widget.css.set(
+            property: CSSProperty(
+                key: "transform",
+                value:
+                    "matrix(\(transform.linearTransform.x), \(transform.linearTransform.z), "
+                    + "\(transform.linearTransform.y), \(transform.linearTransform.w), "
+                    + "\(transform.translation.x), \(transform.translation.y))"
+            )
+        )
+        widget.css.set(property: CSSProperty(key: "transform-origin", value: "0 0"))
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        let radius = max(radius, 0)
+        widget.overflow = .visible
+        widget.css.set(
+            property: CSSProperty(
+                key: "filter",
+                value: radius == 0 ? "none" : "blur(\(radius)px)"
+            )
+        )
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        if visible {
+            widget.show()
+        } else {
+            widget.hide()
+        }
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        widget.css.set(
+            property: CSSProperty(key: "z-index", value: "\(Int(zIndex.rounded()))")
+        )
     }
 
     public func createSplitView(leadingChild: Widget, trailingChild: Widget) -> Widget {

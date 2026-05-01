@@ -15,6 +15,10 @@ GtkSizeRequestMode gtk_custom_root_widget_size_request_mode(GtkWidget *widget) {
     return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH;
 }
 
+static int gtk_custom_root_widget_max(int a, int b) {
+    return a > b ? a : b;
+}
+
 void gtk_custom_root_widget_measure(
     GtkWidget *widget,
     GtkOrientation orientation,
@@ -28,11 +32,17 @@ void gtk_custom_root_widget_measure(
     switch (orientation) {
         case GTK_ORIENTATION_HORIZONTAL:
             *minimum = root_widget->minimum_width;
-            *natural = 0;
+            *natural = gtk_custom_root_widget_max(
+                root_widget->minimum_width,
+                root_widget->allocated_width
+            );
             break;
         case GTK_ORIENTATION_VERTICAL:
             *minimum = root_widget->minimum_height;
-            *natural = 0;
+            *natural = gtk_custom_root_widget_max(
+                root_widget->minimum_height,
+                root_widget->allocated_height
+            );
             break;
     }
 }
@@ -81,7 +91,7 @@ void gtk_custom_root_widget_set_child(GtkCustomRootWidget *self, GtkWidget *chil
 }
 
 void gtk_custom_root_widget_get_size(GtkCustomRootWidget *widget, gint *width, gint *height) {
-    if (widget->has_been_allocated) {
+    if (widget->has_been_allocated || widget->allocated_width != 0 || widget->allocated_height != 0) {
         *width = widget->allocated_width;
         *height = widget->allocated_height;
     } else {

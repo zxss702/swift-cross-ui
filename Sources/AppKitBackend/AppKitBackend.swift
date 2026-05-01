@@ -1,4 +1,6 @@
 import AppKit
+import CoreImage
+import QuartzCore
 import SwiftCrossUI
 
 extension App {
@@ -406,33 +408,27 @@ public final class AppKitBackend: FullAppBackend {
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
+        let index = min(max(index, 0), container.subviews.count)
         container.subviews.insert(child, at: index)
         child.translatesAutoresizingMaskIntoConstraints = false
     }
 
     public func swap(childAt firstIndex: Int, withChildAt secondIndex: Int, in container: NSView) {
-        assert(
-            container.subviews.indices.contains(firstIndex)
-                && container.subviews.indices.contains(secondIndex),
-            """
-            attempted to swap container child out of bounds; container count \
-            = \(container.subviews.count); firstIndex = \(firstIndex); \
-            secondIndex = \(secondIndex)
-            """
-        )
+        guard container.subviews.indices.contains(firstIndex),
+            container.subviews.indices.contains(secondIndex)
+        else {
+            logger.warning("attempted to swap container child out of bounds")
+            return
+        }
 
         container.subviews.swapAt(firstIndex, secondIndex)
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
-        assert(
-            container.subviews.indices.contains(index),
-            """
-            attempted to set position of non-existent container child; container \
-            count = \(container.subviews.count); index = \(index); position = \
-            \(position)
-            """
-        )
+        guard container.subviews.indices.contains(index) else {
+            logger.warning("attempted to set position of non-existent container child")
+            return
+        }
 
         let child = container.subviews[index]
 
@@ -474,6 +470,10 @@ public final class AppKitBackend: FullAppBackend {
     }
 
     public func remove(childAt index: Int, from container: Widget) {
+        guard container.subviews.indices.contains(index) else {
+            logger.warning("attempted to remove non-existent container child")
+            return
+        }
         container.subviews.remove(at: index)
     }
 
@@ -511,6 +511,7 @@ public final class AppKitBackend: FullAppBackend {
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
+        let size = SIMD2(max(size.x, 0), max(size.y, 0))
         setSize(of: widget, to: ProposedViewSize(ViewSize(Double(size.x), Double(size.y))))
     }
 
@@ -550,6 +551,48 @@ public final class AppKitBackend: FullAppBackend {
         if !foundConstraint, let proposedHeight = proposedSize.height {
             widget.heightAnchor.constraint(equalToConstant: proposedHeight).isActive = true
         }
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.alphaValue = CGFloat(min(max(opacity, 0), 1))
+    }
+
+    public func setTransform(of widget: Widget, to transform: SwiftCrossUI.AffineTransform) {
+        widget.wantsLayer = true
+        for subview in widget.subviews {
+            subview.wantsLayer = true
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        widget.layer?.sublayerTransform = CATransform3DMakeAffineTransform(
+            CGAffineTransform(transform)
+        )
+        CATransaction.commit()
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        widget.wantsLayer = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if radius > 0, let filter = CIFilter(name: "CIGaussianBlur") {
+            filter.setValue(radius, forKey: kCIInputRadiusKey)
+            widget.layer?.filters = [filter]
+        } else {
+            widget.layer?.filters = nil
+        }
+        CATransaction.commit()
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        widget.isHidden = !visible
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        widget.wantsLayer = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        widget.layer?.zPosition = CGFloat(zIndex)
+        CATransaction.commit()
     }
     
     public func createTooltipContainer(wrapping child: NSView) -> NSView {
@@ -745,7 +788,7 @@ public final class AppKitBackend: FullAppBackend {
     public func createPicker(style: BackendPickerStyle) -> Widget {
         switch style {
             case .menu:
-                return NSPopUpButton()
+                return NSPopUpButton(frame: .zero, pullsDown: false)
             case .segmented:
                 return NSSegmentedControl()
             case .radioGroup:
@@ -1857,5 +1900,18 @@ final class RadioGroup: NSStackView {
 
     @objc func buttonClicked(sender: NSButton) {
         onChange?(sender.tag)
+    }
+}
+
+private extension CGAffineTransform {
+    init(_ transform: SwiftCrossUI.AffineTransform) {
+        self.init(
+            a: transform.linearTransform.x,
+            b: transform.linearTransform.z,
+            c: transform.linearTransform.y,
+            d: transform.linearTransform.w,
+            tx: transform.translation.x,
+            ty: transform.translation.y
+        )
     }
 }

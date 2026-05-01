@@ -204,6 +204,27 @@ extension UIKitBackend {
         widget.height = size.y
     }
 
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.view.alpha = CGFloat(min(max(opacity, 0), 1))
+    }
+
+    public func setTransform(of widget: Widget, to transform: AffineTransform) {
+        widget.view.transform = CGAffineTransform(transform)
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        // UIKit doesn't provide a cheap blur property for arbitrary views. Keep
+        // this as an immediate no-op instead of falling back to backend animation.
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        widget.view.isHidden = !visible
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        widget.view.layer.zPosition = CGFloat(zIndex)
+    }
+
     public func createScrollContainer(for child: Widget) -> Widget {
         ScrollWidget(child: child)
     }
