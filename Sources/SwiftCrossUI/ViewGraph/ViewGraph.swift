@@ -28,6 +28,8 @@ public class ViewGraph<Root: View> {
 
     /// The environment most recently provided by this node's parent scene.
     private var parentEnvironment: EnvironmentValues
+    private let graphUpdateHost: GraphUpdateHost
+    var updateHost: GraphUpdateHost { graphUpdateHost }
 
     private var isFirstUpdate = true
     private var setIncomingURLHandler: ((@escaping (URL) -> Void) -> Void)?
@@ -43,12 +45,18 @@ public class ViewGraph<Root: View> {
         backend: Backend,
         environment: EnvironmentValues
     ) {
-        rootNode = AnyViewGraphNode(for: view, backend: backend, environment: environment)
+        graphUpdateHost = environment.graphUpdateHost ?? GraphUpdateHost()
+        let graphEnvironment = environment.with(\.graphUpdateHost, graphUpdateHost)
+        rootNode = AnyViewGraphNode(
+            for: view,
+            backend: backend,
+            environment: graphEnvironment
+        )
 
         self.view = view
         latestProposal = .zero
         committedProposal = .zero
-        parentEnvironment = environment
+        parentEnvironment = graphEnvironment
         currentRootViewResult = ViewLayoutResult.leafView(size: .zero)
         setIncomingURLHandler =
             (backend as? any BackendFeatures.IncomingURLs)?.setIncomingURLHandler(to:)
@@ -63,7 +71,7 @@ public class ViewGraph<Root: View> {
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues
     ) -> ViewLayoutResult {
-        parentEnvironment = environment
+        parentEnvironment = environment.with(\.graphUpdateHost, graphUpdateHost)
         latestProposal = proposedSize
 
         let result = rootNode.computeLayout(
