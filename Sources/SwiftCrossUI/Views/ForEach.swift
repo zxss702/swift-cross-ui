@@ -61,7 +61,7 @@ extension ForEach: TypeSafeView, View where Child: View {
             // Deprecated code path. We've centralised the new implementation
             // into computeLayout and commit.
             for (index, node) in children.nodes.enumerated() {
-                backend.insert(node.widget.into(), into: container, at: index)
+                backend.insert(node.getWidget().into(), into: container, at: index)
             }
         }
         return container
@@ -74,18 +74,6 @@ extension ForEach: TypeSafeView, View where Child: View {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
-        func insertChild(_ child: Backend.Widget, atIndex index: Int) {
-            children.queuedChanges.append(.insertChild(AnyWidget(child), index))
-        }
-
-        func removeChild(atIndex index: Int) {
-            children.queuedChanges.append(.removeChild(index))
-        }
-
-        func swap(childAt firstIndex: Int, withChildAt secondIndex: Int) {
-            children.queuedChanges.append(.swapChildren(firstIndex, secondIndex))
-        }
-
         // Use the previous update Method when no keyPath is set on a
         // [Hashable] Collection to optionally keep the old behaviour.
         guard let idKeyPath else {
@@ -98,106 +86,152 @@ extension ForEach: TypeSafeView, View where Child: View {
             )
         }
 
-        var oldIdentifiers = children.identifiers
-        let newIdentifiers = elements.map { $0[keyPath: idKeyPath] }
+        children.proposedSize = proposedSize
+        children.transition = environment.transition
+        children.updateGeneration += 1
+        let generation = children.updateGeneration
+        let oldActiveKeys = children.activeKeys
+        let oldRenderKeys = children.renderKeys
+        var newActiveKeys: [Children.ItemKey] = []
+        var newActiveKeySet = Set<Children.ItemKey>()
+        var occurrenceCounts: [ID: Int] = [:]
+        var warnedDuplicateIdentifiers = Set<ID>()
 
-        // If the identifiers of our elements have changed, then we must rearrange
-        // our nodes and widgets so that child view states remain with their
-        // corresponding identifiers.
-        if oldIdentifiers != newIdentifiers {
-            var oldIdentifierMap = children.identifierMap
-            var oldNodes = children.nodes
-            var seenIdentifiers = Set<ID>()
-            var oldNodesReused = 0
-            children.nodes = []
-            children.identifierMap = [:]
-            children.identifiers = []
-            children.layoutableChildren = []
+        for element in elements {
+            let identifier = element[keyPath: idKeyPath]
+            let occurrence = occurrenceCounts[identifier, default: 0]
+            occurrenceCounts[identifier] = occurrence + 1
+            let key = Children.ItemKey(identifier: identifier, occurrence: occurrence)
+            let childContent = child(element)
+            let childView = AnyView(childContent)
+            let explicitTransition = _optionalTransitionTrait(of: childContent)
+            let childTransition = explicitTransition ?? .opacity
+            let usesTransition = true
 
-            var offset = 0
-            var duplicateCount = 0
-            for (index, element) in elements.enumerated() {
-                let identifier = newIdentifiers[index]
-                let childContent = child(element)
-                let node: AnyViewGraphNode<Child>
-
-                if !seenIdentifiers.insert(identifier).inserted {
-                    // We cannot keep view state attached to the correct ForEach element
-                    // when there are duplicate identifiers. Any elements with unique
-                    // identifiers are guaranteed to keep functioning correctly. Elements
-                    // with non-unique identifiers will get their corresponding view graph
-                    // nodes recreated each time the identifiers of our elements change,
-                    // unless they are the first element with the shared identifier, in which
-                    // case they will inherit the view graph node of the previous first element
-                    // with that same identifier.
-                    logger.warning(
-                        "duplicate identifier in ForEach; view state may not act as you would expect",
-                        metadata: ["identifier": "\(identifier)"]
-                    )
-                    duplicateCount += 1
-                }
-
-                if let oldIndex = oldIdentifierMap.removeValue(forKey: identifier) {
-                    // If the identifier already has a corresponding node, reuse it.
-                    node = oldNodes[oldIndex]
-                    oldNodesReused += 1
-
-                    // If the node's corresponding widget isn't already at the correct
-                    // position (accounting for insertions), then swap it with the widget
-                    // at the target position and update our accounting accordinly.
-                    if index != offset + oldIndex {
-                        // When talking about current widget indices, we add `offset` to oldIndex.
-                        // When talking about old element indices, we subtract `offset` from index.
-                        swap(childAt: offset + oldIndex, withChildAt: index)
-                        oldNodes.swapAt(oldIndex, index - offset)
-                        oldIdentifierMap[oldIdentifiers[index - offset]] = oldIndex
-                        oldIdentifiers.swapAt(oldIndex, index - offset)
-                    }
-                } else {
-                    // If the identifier is new, create a node for it and insert its
-                    // widget at the correct position.
-                    node = AnyViewGraphNode(
-                        for: childContent,
-                        backend: backend,
-                        environment: environment
-                    )
-                    insertChild(node.widget.into(), atIndex: index)
-
-                    // `offset` tracks how many elements have been inserted, which we
-                    // use to adjust old indices. All nodes before the one we just
-                    // inserted are already at their final position, so we never have
-                    // to adjust old indices that point to before our latest insertion, otherwise
-                    // such a simple adjustment wouldn't be possible.
-                    offset += 1
-                }
-
-                children.nodes.append(node)
-                children.identifierMap[identifier] = index
-                children.identifiers.append(identifier)
-                children.layoutableChildren.append(
-                    LayoutSystem.LayoutableChild(node) { child(element) }
+            if occurrence > 0 && warnedDuplicateIdentifiers.insert(identifier).inserted {
+                logger.warning(
+                    "duplicate identifier in ForEach; view state may not act as you would expect",
+                    metadata: ["identifier": "\(identifier)"]
                 )
             }
 
-            // TODO: We should be able to reuse unused widgets in newly created nodes.
-            // Remove unused widgets, starting from the end of the container for
-            // cheaper removals.
-            let removalCount = oldNodes.count - oldNodesReused
-            if removalCount > 0 {
-                for i in (0..<removalCount).reversed() {
-                    removeChild(atIndex: children.nodes.count + i)
+            if let item = children.items[key] {
+                item.view = childView
+                item.transition = childTransition
+                item.usesTransition = usesTransition
+                item.generation = generation
+                item.isRemovalScheduled = false
+                if item.phase == .didDisappear {
+                    item.phase = .identity
                 }
+            } else {
+                let shouldTransition = usesTransition
+                    && children.hasMounted
+                    && childTransition.duration(for: environment.transaction) > 0
+                let initialPhase = shouldTransition ? TransitionPhase.willAppear : .identity
+                let nodeView = !usesTransition && initialPhase == .identity
+                    ? childView
+                    : transitioned(
+                        childView,
+                        phase: initialPhase,
+                        transition: childTransition
+                    )
+                let node = ErasedViewGraphNode(
+                    for: nodeView,
+                    backend: backend,
+                    environment: environment
+                )
+                let item = Children.Item(
+                    key: key,
+                    node: node,
+                    view: childView,
+                    transition: childTransition,
+                    usesTransition: usesTransition,
+                    phase: initialPhase,
+                    generation: generation
+                )
+                children.items[key] = item
+            }
+
+            newActiveKeys.append(key)
+            newActiveKeySet.insert(key)
+        }
+
+        for key in Array(children.items.keys) {
+            guard let item = children.items[key] else {
+                continue
+            }
+            if newActiveKeySet.contains(key) {
+                continue
+            }
+            if item.phase == .didDisappear {
+                continue
+            }
+            let shouldTransition = item.usesTransition
+                && children.hasMounted
+                && item.transition.duration(for: environment.transaction) > 0
+            if shouldTransition {
+                item.phase = .didDisappear
+                item.generation = generation
+                item.removalGeneration += 1
+                item.isRemovalScheduled = false
+            } else {
+                children.items[key] = nil
+                LayoutPresentationStore.shared.removePosition(for: item.animationID)
             }
         }
 
-        // Recompute layoutable children if the last commit cleared them
-        if children.layoutableChildren.isEmpty && !children.nodes.isEmpty {
-            children.layoutableChildren = zip(children.nodes, elements).map { (node, element) in
-                LayoutSystem.LayoutableChild(node) { child(element) }
+        let removalKeys = oldRenderKeys.filter { key in
+            guard let item = children.items[key] else {
+                return false
             }
+            return item.phase == .didDisappear && !newActiveKeySet.contains(key)
         }
 
-        return LayoutSystem.computeStackLayout(
+        var renderKeys = newActiveKeys
+        for key in removalKeys {
+            guard !renderKeys.contains(key) else {
+                continue
+            }
+            let oldIndex = oldRenderKeys.firstIndex(of: key) ?? renderKeys.count
+            renderKeys.insert(key, at: min(oldIndex, renderKeys.count))
+        }
+
+        children.activeKeys = newActiveKeys
+        children.renderKeys = renderKeys
+        children.syncLegacyFields()
+
+        if oldActiveKeys != newActiveKeys {
+            children.stackLayoutCache = .initial
+        }
+        if oldRenderKeys != children.renderKeys {
+            children.needsWidgetSync = true
+        }
+
+        children.layoutableKeys = []
+        children.layoutableChildren = newActiveKeys.compactMap { key in
+            guard let item = children.items[key] else {
+                return nil
+            }
+            children.layoutableKeys.append(key)
+            return layoutableChild(
+                for: item,
+                phase: item.phase,
+                environment: environment
+            )
+        }
+        children.removalLayoutableChildren = removalKeys.compactMap { key in
+            children.items[key].map { item in
+                layoutableChild(
+                    for: item,
+                    phase: item.phase,
+                    environment: environment
+                )
+            }
+        }
+        children.removalLayoutKeys = removalKeys
+
+        let result = LayoutSystem.computeStackLayout(
             container: widget,
             children: children.layoutableChildren,
             cache: &children.stackLayoutCache,
@@ -205,6 +239,67 @@ extension ForEach: TypeSafeView, View where Child: View {
             environment: environment,
             backend: backend
         )
+        for child in children.removalLayoutableChildren {
+            _ = child.computeLayout(
+                proposedSize: proposedSize,
+                environment: environment
+            )
+        }
+        return result
+    }
+
+    @MainActor
+    private func transitioned(
+        _ view: AnyView,
+        phase: TransitionPhase,
+        transition: AnyTransition
+    ) -> AnyView {
+        transition.applyTransition(view, phase)
+    }
+
+    @MainActor
+    private func layoutableChild(
+        for item: Children.Item,
+        phase: TransitionPhase,
+        environment: EnvironmentValues
+    ) -> LayoutSystem.LayoutableChild {
+        LayoutSystem.LayoutableChild(
+            computeLayout: { proposedSize, proposedEnvironment in
+                let view = !item.usesTransition && phase == .identity
+                    ? item.view
+                    : transitioned(
+                        item.view,
+                        phase: phase,
+                        transition: item.transition
+                    )
+                let environment = !item.usesTransition && phase == .identity
+                    ? proposedEnvironment
+                    : transitionEnvironment(
+                        transition: item.transition,
+                        environment: proposedEnvironment
+                    )
+                return item.node.computeLayoutWithNewView(
+                    view,
+                    proposedSize,
+                    environment
+                ).size
+            },
+            commit: {
+                item.node.commit()
+            },
+            animationID: item.animationID
+        )
+    }
+
+    private func transitionEnvironment(
+        transition: AnyTransition,
+        environment: EnvironmentValues
+    ) -> EnvironmentValues {
+        var transaction = environment.transaction
+        if !transaction.disablesAnimations {
+            transaction.animation = transition.animation(for: transaction)
+        }
+        return environment.withCurrentTransaction(transaction)
     }
 
     @MainActor
@@ -238,9 +333,11 @@ extension ForEach: TypeSafeView, View where Child: View {
             }
             let index = elements.index(elementsStartIndex, offsetBy: i)
             if children.isFirstUpdate {
-                insertChild(node.widget.into(), atIndex: i)
+                insertChild(node.getWidget().into(), atIndex: i)
             }
-            let layoutableChild = LayoutSystem.LayoutableChild(node) { child(elements[index]) }
+            let layoutableChild = LayoutSystem.LayoutableChild(node) {
+                child(elements[index])
+            }
             layoutableChildren.append(layoutableChild)
         }
         children.isFirstUpdate = false
@@ -251,14 +348,16 @@ extension ForEach: TypeSafeView, View where Child: View {
             let startIndex = elements.index(elementsStartIndex, offsetBy: nodeCount)
             for i in 0..<remainingElementCount {
                 let element = elements[elements.index(startIndex, offsetBy: i)]
-                let node = AnyViewGraphNode(
+                let node = ErasedViewGraphNode(
                     for: child(element),
                     backend: backend,
                     environment: environment
                 )
-                insertChild(node.widget.into(), atIndex: children.nodes.count)
+                insertChild(node.getWidget().into(), atIndex: children.nodes.count)
                 children.nodes.append(node)
-                let layoutableChild = LayoutSystem.LayoutableChild(node) { child(element) }
+                let layoutableChild = LayoutSystem.LayoutableChild(node) {
+                    child(element)
+                }
                 layoutableChildren.append(layoutableChild)
             }
         } else if remainingElementCount < 0 {
@@ -292,27 +391,237 @@ extension ForEach: TypeSafeView, View where Child: View {
                     backend.insert(child.into(), into: widget, at: index)
                 case .removeChild(let index):
                     backend.remove(childAt: index, from: widget)
-                case .swapChildren(let firstIndex, let secondIndex):
-                    backend.swap(childAt: firstIndex, withChildAt: secondIndex, in: widget)
             }
         }
         children.queuedChanges = []
+        syncRenderedWidgets(widget, children: children, backend: backend)
 
-        LayoutSystem.commitStackLayout(
+        if children.hasMounted {
+            for key in children.activeKeys {
+                guard
+                    let item = children.items[key],
+                    let lastPosition = item.lastPosition
+                else {
+                    continue
+                }
+                LayoutPresentationStore.shared.seedPositionIfNeeded(
+                    for: item.animationID,
+                    position: lastPosition
+                )
+            }
+        }
+
+        let activeChildIndices = children.layoutableKeys.compactMap { key in
+            children.committedRenderKeys.firstIndex(of: key)
+        }
+        let resolvedActiveChildIndices: [Int]? =
+            activeChildIndices.count == children.layoutableChildren.count
+            ? activeChildIndices
+            : nil
+        let activePositions = LayoutSystem.commitStackLayout(
             container: widget,
             children: children.layoutableChildren,
             cache: &children.stackLayoutCache,
             layout: layout,
             environment: environment,
+            backend: backend,
+            childIndices: resolvedActiveChildIndices
+        )
+        for (key, position) in zip(children.layoutableKeys, activePositions) {
+            children.items[key]?.lastPosition = position
+        }
+
+        for (index, child) in children.removalLayoutableChildren.enumerated() {
+            guard
+                index < children.removalLayoutKeys.count,
+                let item = children.items[children.removalLayoutKeys[index]],
+                let renderIndex = children.committedRenderKeys.firstIndex(of: item.key)
+            else {
+                continue
+            }
+            _ = child.commit()
+            backend.setPosition(
+                ofChildAt: renderIndex,
+                in: widget,
+                to: (item.lastPosition ?? .zero).vector
+            )
+        }
+
+        scheduleRemovalsIfNeeded(
+            widget,
+            children: children,
+            environment: environment,
+            backend: backend
+        )
+        scheduleInsertionUpdateIfNeeded(
+            children: children,
+            environment: environment,
             backend: backend
         )
 
-        // Reset layoutable children cache so that we recompute them during the
-        // next update cycle. This is important at the moment because the `child`
-        // closure and `elements` array may have changed. In future we'll separate
-        // view body recomputation from the computeLayout step, which should simplify
-        // things.
-        children.layoutableChildren = []
+        children.hasMounted = true
+    }
+
+    @MainActor
+    private func syncRenderedWidgets<Backend: AppBackend>(
+        _ widget: Backend.Widget,
+        children: Children,
+        backend: Backend
+    ) {
+        guard children.needsWidgetSync
+            || children.committedRenderKeys != children.renderKeys
+        else {
+            return
+        }
+
+        let current = children.committedRenderKeys
+        let target = children.renderKeys
+
+        var insertedKeys: [Children.ItemKey] = []
+        if current != target {
+            backend.removeAllChildren(of: widget)
+            for key in target {
+                guard let child = children.items[key]?.node.getWidget() else {
+                    continue
+                }
+                backend.insert(child.into(), into: widget, at: insertedKeys.count)
+                insertedKeys.append(key)
+            }
+        } else {
+            insertedKeys = target
+        }
+
+        children.committedRenderKeys = insertedKeys
+        children.needsWidgetSync = false
+    }
+
+    @MainActor
+    private func scheduleInsertionUpdateIfNeeded<Backend: AppBackend>(
+        children: Children,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        var hasInsertion = false
+        for key in children.activeKeys {
+            guard let item = children.items[key], item.phase == .willAppear else {
+                continue
+            }
+            item.phase = .identity
+            hasInsertion = true
+        }
+
+        guard hasInsertion else {
+            return
+        }
+
+        children.stackLayoutCache = .initial
+        let transaction = environment.transaction
+        requestGraphUpdate(
+            children: children,
+            environment: environment.withCurrentTransaction(transaction),
+            backend: backend
+        )
+    }
+
+    @MainActor
+    private func scheduleRemovalsIfNeeded<Backend: AppBackend>(
+        _ widget: Backend.Widget,
+        children: Children,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        let removalItems = children.renderKeys.compactMap { key -> Children.Item? in
+            guard
+                let item = children.items[key],
+                item.phase == .didDisappear
+            else {
+                return nil
+            }
+            return item
+        }
+        guard !removalItems.isEmpty else {
+            return
+        }
+
+        for item in removalItems {
+            guard !item.isRemovalScheduled else {
+                continue
+            }
+            item.isRemovalScheduled = true
+            let generation = item.removalGeneration
+            let key = item.key
+            let duration = item.transition.duration(
+                for: environment.transaction
+            )
+            let remove: @MainActor @Sendable () -> Void = {
+                guard
+                    let item = children.items[key],
+                    item.phase == .didDisappear,
+                    item.removalGeneration == generation
+                else {
+                    return
+                }
+                children.items[key] = nil
+                LayoutPresentationStore.shared.removePosition(for: item.animationID)
+                children.renderKeys.removeAll { $0 == key }
+                children.removalLayoutKeys.removeAll { $0 == key }
+                children.needsWidgetSync = true
+                children.syncLegacyFields()
+                children.stackLayoutCache = .initial
+                requestGraphUpdate(
+                    children: children,
+                    environment: environment,
+                    backend: backend
+                )
+            }
+
+            guard duration > 0 else {
+                remove()
+                continue
+            }
+
+            guard let graphUpdateHost = environment.graphUpdateHost else {
+                backend.runInMainThread {
+                    remove()
+                }
+                continue
+            }
+
+            graphUpdateHost.enqueueAfter(
+                backend: backend,
+                delay: duration,
+                transaction: environment.transaction,
+                key: AnyHashable(key),
+                action: remove
+            )
+        }
+    }
+
+    @MainActor
+    private func requestGraphUpdate<Backend: AppBackend>(
+        children: Children,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        let transaction = environment.transaction
+        guard let graphUpdateHost = environment.graphUpdateHost else {
+            backend.runInMainThread {
+                withTransaction(transaction) {
+                    StateMutationContext.withTransaction(transaction) {
+                        environment.onResize(.zero)
+                    }
+                }
+            }
+            return
+        }
+
+        graphUpdateHost.enqueue(
+            backend: backend,
+            transaction: transaction,
+            key: AnyHashable(ObjectIdentifier(children))
+        ) {
+            environment.onResize(.zero)
+        }
     }
 }
 
@@ -332,13 +641,24 @@ class ForEachViewChildren<
     Child: View
 >: ViewGraphNodeChildren {
     /// The nodes for all current children of the ``ForEach`` view.
-    var nodes: [AnyViewGraphNode<Child>] = []
+    var nodes: [ErasedViewGraphNode] = []
 
     /// A map from element identifier to node index.
     var identifierMap: [ID: Int]
 
     /// The identifiers corresponding to ``nodes``.
     var identifiers: [ID]
+
+    var items: [ItemKey: Item] = [:]
+    var activeKeys: [ItemKey] = []
+    var renderKeys: [ItemKey] = []
+    var committedRenderKeys: [ItemKey] = []
+    var transition = AnyTransition.opacity
+    var proposedSize = ProposedViewSize.zero
+    var removalLayoutKeys: [ItemKey] = []
+    var updateGeneration = 0
+    var hasMounted = false
+    var needsWidgetSync = false
 
     /// Changes queued during computeLayout.
     var queuedChanges: [Change] = []
@@ -347,7 +667,6 @@ class ForEachViewChildren<
     enum Change: CustomStringConvertible {
         case insertChild(AnyWidget, Int)
         case removeChild(Int)
-        case swapChildren(Int, Int)
 
         var description: String {
             switch self {
@@ -355,8 +674,6 @@ class ForEachViewChildren<
                     "Insert widget \(ObjectIdentifier(widget.widget as AnyObject)) at \(index)"
                 case .removeChild(let index):
                     "Remove widget at \(index)"
-                case .swapChildren(let firstIndex, let secondIndex):
-                    "Swap widgets at \(firstIndex) and \(secondIndex)"
             }
         }
     }
@@ -364,18 +681,22 @@ class ForEachViewChildren<
     /// Only used by ``ForEach/deprecatedUpdate(_:children:proposedSize:environment:backend:)``.
     var isFirstUpdate = true
 
-    /// A cache of the view's children, used when the ForEach's element
-    /// identifiers haven't changed since the previous layout computation.
+    var layoutableKeys: [ItemKey] = []
     var layoutableChildren: [LayoutSystem.LayoutableChild] = []
+    var removalLayoutableChildren: [LayoutSystem.LayoutableChild] = []
 
     var widgets: [AnyWidget] {
-        nodes.map(\.widget)
+        renderKeys.compactMap { key in
+            items[key]?.node.getWidget()
+        }
     }
 
     // TODO: This pattern of erasing by wrapping in a temporary class seems
     //   inefficient. Could ErasedViewGraphNode maybe be a struct instead?
     var erasedNodes: [ErasedViewGraphNode] {
-        nodes.map(ErasedViewGraphNode.init(wrapping:))
+        renderKeys.compactMap { key in
+            items[key]?.node
+        }
     }
 
     var stackLayoutCache = StackLayoutCache.initial
@@ -398,16 +719,66 @@ class ForEachViewChildren<
                 .enumerated()
                 .map { (index, child) in
                     let snapshot = index < snapshots?.count ?? 0 ? snapshots?[index] : nil
-                    return ViewGraphNode(
+                    return ErasedViewGraphNode(
                         for: child,
                         backend: backend,
                         snapshot: snapshot,
                         environment: environment
                     )
                 }
-                .map(AnyViewGraphNode.init(_:))
         } else {
             nodes = []
+        }
+    }
+
+    struct ItemKey: Hashable {
+        var identifier: ID
+        var occurrence: Int
+    }
+
+    final class Item {
+        var key: ItemKey
+        var node: ErasedViewGraphNode
+        var view: AnyView
+        var transition: AnyTransition
+        var usesTransition: Bool
+        var phase: TransitionPhase
+        var generation: Int
+        let animationID: ObjectIdentifier
+        var removalGeneration = 0
+        var isRemovalScheduled = false
+        var lastPosition: Position?
+
+        @MainActor
+        init(
+            key: ItemKey,
+            node: ErasedViewGraphNode,
+            view: AnyView,
+            transition: AnyTransition,
+            usesTransition: Bool,
+            phase: TransitionPhase,
+            generation: Int
+        ) {
+            self.key = key
+            self.node = node
+            self.view = view
+            self.transition = transition
+            self.usesTransition = usesTransition
+            self.phase = phase
+            self.generation = generation
+            animationID = ObjectIdentifier(node.getWidget().widget as AnyObject)
+        }
+    }
+
+    func syncLegacyFields() {
+        nodes = activeKeys.compactMap { key in
+            items[key]?.node
+        }
+        identifiers = activeKeys.map(\.identifier)
+        identifierMap = [:]
+        for (index, key) in activeKeys.enumerated()
+        where key.occurrence == 0 {
+            identifierMap[key.identifier] = index
         }
     }
 }

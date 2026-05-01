@@ -59,6 +59,20 @@ public struct AnyView: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
+        children.proposedSize = proposedSize
+        let childType = ObjectIdentifier(type(of: child))
+
+        if childType != children.childType {
+            children.node = ErasedViewGraphNode(
+                for: child,
+                backend: backend,
+                environment: environment
+            )
+            children.currentView = AnyView(child)
+            children.childType = childType
+            children.widgetNeedsReinsertion = true
+        }
+
         var (viewTypesMatched, result) = children.node.computeLayoutWithNewView(
             child,
             proposedSize,
@@ -96,7 +110,7 @@ public struct AnyView: TypeSafeView {
         backend: Backend
     ) {
         if children.widgetNeedsReinsertion {
-            backend.remove(childAt: 0, from: widget)
+            backend.removeAllChildren(of: widget)
             backend.insert(children.node.getWidget().into(), into: widget, at: 0)
             backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
             children.widgetNeedsReinsertion = false
@@ -105,17 +119,21 @@ public struct AnyView: TypeSafeView {
         _ = children.node.commit()
 
         backend.setSize(of: widget, to: layout.size.vector)
+        backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
     }
 }
 
 class AnyViewChildren: ViewGraphNodeChildren {
     /// The erased underlying node.
     var node: ErasedViewGraphNode
+    var currentView: AnyView
+    var childType: ObjectIdentifier
+    var proposedSize = ProposedViewSize.zero
     /// Stores whether or not the displayed view changed during computeLayout.
     var widgetNeedsReinsertion = false
 
     var widgets: [AnyWidget] {
-        return [node.getWidget()]
+        [node.getWidget()]
     }
 
     var erasedNodes: [ErasedViewGraphNode] {
@@ -129,6 +147,8 @@ class AnyViewChildren: ViewGraphNodeChildren {
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,
         environment: EnvironmentValues
     ) {
+        currentView = AnyView(view.child)
+        childType = ObjectIdentifier(type(of: view.child))
         node = ErasedViewGraphNode(
             for: view.child,
             backend: backend,
