@@ -50,33 +50,53 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
 
         self.window = window
         parentEnvironment = environment
+            .with(\.graphUpdateHost, viewGraph.updateHost)
+            .withoutCurrentTransaction()
 
         backend.setCloseHandler(ofWindow: window, to: closeHandler)
 
         backend.setResizeHandler(ofWindow: window) { [weak self] newSize in
             guard let self else { return }
-            self.update(
-                self.scene,
-                proposedWindowSize: newSize,
-                needsWindowSizeCommit: false,
+            guard !self.isFirstUpdate else {
+                return
+            }
+            self.enqueueUpdate(
                 backend: backend,
-                environment: self.parentEnvironment,
-                windowSizeIsFinal:
-                    !backend.isWindowProgrammaticallyResizable(window)
-            )
+                transaction: TransactionContext.current,
+                key: "window-resize"
+            ) {
+                self.update(
+                    self.scene,
+                    proposedWindowSize: newSize,
+                    needsWindowSizeCommit: false,
+                    backend: backend,
+                    environment: self.parentEnvironment,
+                    windowSizeIsFinal:
+                        !backend.isWindowProgrammaticallyResizable(window)
+                )
+            }
         }
 
         backend.setWindowEnvironmentChangeHandler(of: window) { [weak self] in
             guard let self else { return }
-            self.update(
-                self.scene,
-                proposedWindowSize: backend.size(ofWindow: window),
-                needsWindowSizeCommit: false,
+            guard !self.isFirstUpdate else {
+                return
+            }
+            self.enqueueUpdate(
                 backend: backend,
-                environment: self.parentEnvironment,
-                windowSizeIsFinal:
-                    !backend.isWindowProgrammaticallyResizable(window)
-            )
+                transaction: TransactionContext.current,
+                key: "window-environment"
+            ) {
+                self.update(
+                    self.scene,
+                    proposedWindowSize: backend.size(ofWindow: window),
+                    needsWindowSizeCommit: false,
+                    backend: backend,
+                    environment: self.parentEnvironment,
+                    windowSizeIsFinal:
+                        !backend.isWindowProgrammaticallyResizable(window)
+                )
+            }
         }
     }
 
@@ -141,6 +161,8 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         }
 
         parentEnvironment = environment
+            .with(\.graphUpdateHost, viewGraph.updateHost)
+            .withoutCurrentTransaction()
 
         if let newScene {
             // Don't set default size even if it has changed. We only set that once
@@ -157,18 +179,26 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
                 window: window,
                 rootEnvironment: environment.with(\.window, window)
             )
+            .with(\.graphUpdateHost, viewGraph.updateHost)
             .with(\.onResize) { [weak self] _ in
                 guard let self else { return }
                 // TODO: Figure out whether this would still work if we didn't recompute the
                 //   scene's body. I have a vague feeling that it wouldn't work in all cases?
                 //   But I don't have the time to come up with a counterexample right now.
-                self.update(
-                    self.scene,
-                    proposedWindowSize: backend.size(ofWindow: window),
-                    needsWindowSizeCommit: false,
+                let transaction = StateMutationContext.currentTransaction
+                self.enqueueUpdate(
                     backend: backend,
-                    environment: environment
-                )
+                    transaction: transaction,
+                    key: "window-content-resize"
+                ) {
+                    self.update(
+                        self.scene,
+                        proposedWindowSize: backend.size(ofWindow: window),
+                        needsWindowSizeCommit: false,
+                        backend: backend,
+                        environment: environment.withCurrentTransaction(transaction)
+                    )
+                }
             }
         let outerColorScheme = environment.colorScheme
 
@@ -260,6 +290,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
             backend: backend
         )
 
+        backend.setSize(of: containerWidget.into(), to: proposedWindowSize)
         backend.setPosition(
             ofChildAt: 0,
             in: containerWidget.into(),
@@ -294,7 +325,41 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
     }
     
     func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
-        self.update(self.scene, backend: backend, environment: self.parentEnvironment)
+        enqueueUpdate(
+            backend: backend,
+            transaction: StateMutationContext.currentTransaction
+                .overlaid(by: TransactionContext.current),
+            key: "window-scene-observation"
+        ) {
+            self.update(self.scene, backend: backend, environment: self.parentEnvironment)
+        }
+    }
+
+    func enqueueObservedChange<Backend: AppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    ) {
+        enqueueUpdate(
+            backend: backend,
+            transaction: transaction,
+            key: "window-scene-observation"
+        ) {
+            self.update(self.scene, backend: backend, environment: self.parentEnvironment)
+        }
+    }
+
+    private func enqueueUpdate<Backend: AppBackend>(
+        backend: Backend,
+        transaction: Transaction,
+        key: AnyHashable,
+        action: @escaping @MainActor () -> Void
+    ) {
+        viewGraph.updateHost.enqueue(
+            backend: backend,
+            transaction: transaction,
+            key: key,
+            action: action
+        )
     }
 
     func activate<Backend: AppBackend>(backend: Backend) {
@@ -323,4 +388,5 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
             environment.colorScheme = outerColorScheme
         }
     }
+
 }
