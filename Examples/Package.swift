@@ -115,6 +115,10 @@ let package = Package(
             ] + exampleDependencies
         ),
         .executableTarget(
+            name: "AnimationExample",
+            dependencies: exampleDependencies
+        ),
+        .executableTarget(
             name: "ObservableExample",
             dependencies: exampleDependencies
                 + [.product(name: "Perception", package: "swift-perception")]
