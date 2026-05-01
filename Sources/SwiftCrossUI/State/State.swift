@@ -11,6 +11,7 @@ import PerceptionCore
 public struct State<Value>: ObservableProperty {
     private final class Storage: StateStorageProtocol {
         var value: Value
+        var wasRead = false
         var didChange = Publisher()
         var downstreamObservation: Cancellable?
 
