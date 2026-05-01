@@ -414,10 +414,17 @@ extension ForEach: TypeSafeView, View where Child: View {
         let activeChildIndices = children.layoutableKeys.compactMap { key in
             children.committedRenderKeys.firstIndex(of: key)
         }
-        let resolvedActiveChildIndices: [Int]? =
-            activeChildIndices.count == children.layoutableChildren.count
-            ? activeChildIndices
-            : nil
+        guard activeChildIndices.count == children.layoutableChildren.count else {
+            logger.warning("ForEach skipped commit with stale child indices")
+            children.needsWidgetSync = true
+            requestGraphUpdate(
+                children: children,
+                environment: environment,
+                backend: backend
+            )
+            return
+        }
+
         let activePositions = LayoutSystem.commitStackLayout(
             container: widget,
             children: children.layoutableChildren,
@@ -425,7 +432,7 @@ extension ForEach: TypeSafeView, View where Child: View {
             layout: layout,
             environment: environment,
             backend: backend,
-            childIndices: resolvedActiveChildIndices
+            childIndices: activeChildIndices
         )
         for (key, position) in zip(children.layoutableKeys, activePositions) {
             children.items[key]?.lastPosition = position
