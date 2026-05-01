@@ -8,6 +8,11 @@ public enum LayoutSystem {
     }
 
     package static func roundSize(_ size: Double) -> Int {
+        if size.isNaN {
+            logger.warning("LayoutSystem.roundSize(_:) called with NaN")
+            return 0
+        }
+
         if size.isInfinite {
             logger.warning("LayoutSystem.roundSize(_:) called with infinite size")
         }
@@ -56,6 +61,7 @@ public enum LayoutSystem {
                 _ environment: EnvironmentValues
             ) -> ViewLayoutResult
         private var _commit: @MainActor () -> ViewLayoutResult
+        var animationID: ObjectIdentifier?
         var tag: String?
 
         public init(
@@ -63,13 +69,16 @@ public enum LayoutSystem {
                 @escaping @MainActor (ProposedViewSize, EnvironmentValues) ->
                 ViewLayoutResult,
             commit: @escaping @MainActor () -> ViewLayoutResult,
+            animationID: ObjectIdentifier? = nil,
             tag: String? = nil
         ) {
             self.computeLayout = computeLayout
             self._commit = commit
+            self.animationID = animationID
             self.tag = tag
         }
 
+        @MainActor
         init<Child: View>(
             _ node: AnyViewGraphNode<Child>,
             child: @escaping @Sendable @MainActor () -> Child?
@@ -84,7 +93,28 @@ public enum LayoutSystem {
                 },
                 commit: {
                     node.commit()
-                }
+                },
+                animationID: ObjectIdentifier(node.widget.widget as AnyObject)
+            )
+        }
+
+        @MainActor
+        init(
+            _ node: ErasedViewGraphNode,
+            child: @escaping @Sendable @MainActor () -> Any?
+        ) {
+            self.init(
+                computeLayout: { proposedSize, environment in
+                    node.computeLayoutWithNewView(
+                        child(),
+                        proposedSize,
+                        environment
+                    ).size
+                },
+                commit: {
+                    node.commit()
+                },
+                animationID: ObjectIdentifier(node.getWidget().widget as AnyObject)
             )
         }
 
@@ -324,14 +354,16 @@ public enum LayoutSystem {
     }
 
     @MainActor
+    @discardableResult
     static func commitStackLayout<Backend: AppBackend>(
         container: Backend.Widget,
         children: [LayoutableChild],
         cache: inout StackLayoutCache,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
-        backend: Backend
-    ) {
+        backend: Backend,
+        childIndices: [Int]? = nil
+    ) -> [Position] {
         let size = layout.size
         backend.setSize(of: container, to: size.vector)
 
@@ -352,6 +384,10 @@ public enum LayoutSystem {
         }
 
         let renderedChildren = children.map { $0.commit() }
+        var childPositions = Array(
+            repeating: Position.zero,
+            count: renderedChildren.count
+        )
 
         var position = Position.zero
         for (index, child) in renderedChildren.enumerated() {
@@ -376,10 +412,30 @@ public enum LayoutSystem {
                     position[component: perpendicularOrientation] = outer - inner
             }
 
-            backend.setPosition(ofChildAt: index, in: container, to: position.vector)
+            let childPosition: Position
+            if let animationID = children[index].animationID {
+                childPosition = LayoutPresentationStore.shared.position(
+                    for: animationID,
+                    target: position,
+                    transaction: environment.transaction,
+                    environment: environment
+                ) { transaction in
+                    environment.requestRenderFrame(transaction)
+                }
+            } else {
+                childPosition = position
+            }
+
+            childPositions[index] = childPosition
+            backend.setPosition(
+                ofChildAt: childIndices?[index] ?? index,
+                in: container,
+                to: childPosition.vector
+            )
 
             position[component: orientation] += child.size[component: orientation] + Double(spacing)
         }
+        return childPositions
     }
 
     /// The main stack layout space allocation algorithm. Used during
