@@ -42,6 +42,13 @@ public struct EnvironmentValues {
     /// events can propagate.
     var onResize: @MainActor (_ newSize: ViewSize) -> Void
 
+    /// Called by animatable presentation values when they need another render
+    /// pass without invalidating layout or view dependencies.
+    var requestRenderFrame: @MainActor (_ transaction: Transaction) -> Void
+
+    /// The transaction-aware update queue for this view graph.
+    var graphUpdateHost: GraphUpdateHost?
+
     /// Backing storage for extensible subscript
     private var values: [ObjectIdentifier: Any]
 
@@ -205,6 +212,8 @@ public struct EnvironmentValues {
         self.backend = backend
 
         onResize = { _ in }
+        requestRenderFrame = { _ in }
+        graphUpdateHost = nil
         values = [:]
         observableObjects = [:]
 
