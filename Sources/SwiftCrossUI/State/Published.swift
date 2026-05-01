@@ -49,8 +49,10 @@ public final class Published<Value>: ObservableObject, PublishedMarkerProtocol {
             get: {
                 self.wrappedValue
             },
-            set: { newValue in
-                self.wrappedValue = newValue
+            set: { newValue, transaction in
+                withTransaction(transaction) {
+                    self.wrappedValue = newValue
+                }
             }
         )
     }
@@ -101,7 +103,9 @@ public final class Published<Value>: ObservableObject, PublishedMarkerProtocol {
     /// upstream publisher will still get relinked.
     public func valueDidChange(publish: Bool = true) {
         if publish {
-            didChange.send()
+            StateMutationContext.withTransaction(TransactionContext.current) {
+                didChange.send()
+            }
         }
 
         if let upstream = wrappedValue as? ObservableObject {

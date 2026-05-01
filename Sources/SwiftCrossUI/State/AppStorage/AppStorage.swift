@@ -12,6 +12,7 @@ public struct AppStorage<Value: Codable & Sendable>: ObservableProperty {
 
     private final class Storage: StateStorageProtocol {
         let mode: Mode
+        var wasRead = false
         var downstreamObservation: Cancellable?
         var provider: (any AppStorageProvider)?
 
