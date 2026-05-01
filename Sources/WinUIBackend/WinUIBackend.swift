@@ -375,6 +375,15 @@ public final class WinUIBackend: AppBackend {
         }
     }
 
+    public nonisolated var preferredFramesPerSecond: Double {
+        MainActor.assumeIsolated {
+            guard let hwnd = windows.first?.getHWND() else {
+                return scui_get_primary_refresh_rate()
+            }
+            return scui_get_refresh_rate_for_window(hwnd)
+        }
+    }
+
     public func show(widget _: Widget) {}
 
     private func renderMenuItem(

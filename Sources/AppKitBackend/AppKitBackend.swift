@@ -278,6 +278,17 @@ public final class AppKitBackend: AppBackend {
         }
     }
 
+    public nonisolated var preferredFramesPerSecond: Double {
+        MainActor.assumeIsolated {
+            if #available(macOS 12.0, *) {
+                let screen = NSApplication.shared.keyWindow?.screen ?? NSScreen.main
+                return Double(max(screen?.maximumFramesPerSecond ?? 60, 1))
+            } else {
+                return 60
+            }
+        }
+    }
+
     public func computeRootEnvironment(defaultEnvironment: EnvironmentValues) -> EnvironmentValues {
         let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         return

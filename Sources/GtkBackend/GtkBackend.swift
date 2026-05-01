@@ -467,6 +467,37 @@ public final class GtkBackend: AppBackend {
         )
     }
 
+    public nonisolated var preferredFramesPerSecond: Double {
+        MainActor.assumeIsolated {
+            Self.currentDisplayRefreshRate()
+        }
+    }
+
+    private static func currentDisplayRefreshRate() -> Double {
+        guard let display = gdk_display_get_default(),
+            let monitors = gdk_display_get_monitors(display)
+        else {
+            return 60
+        }
+
+        let count = g_list_model_get_n_items(monitors)
+        for index in 0..<count {
+            guard let monitor = g_list_model_get_item(monitors, index) else {
+                continue
+            }
+            defer {
+                g_object_unref(monitor)
+            }
+
+            let refreshRate = gdk_monitor_get_refresh_rate(OpaquePointer(monitor))
+            if refreshRate > 0 {
+                return Double(refreshRate) / 1_000
+            }
+        }
+
+        return 60
+    }
+
     private static func runInMainThread(
         afterMilliseconds delay: Int,
         action: @escaping () -> Void
