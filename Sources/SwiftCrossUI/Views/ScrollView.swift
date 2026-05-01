@@ -111,11 +111,11 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         // scroll bar sizes from non-scrolling axes.
         var finalContentSizeProposal = childProposal
         if !axes.contains(.horizontal), let proposedWidth = childProposal.width {
-            finalContentSizeProposal.width = proposedWidth - verticalScrollBarWidth
+            finalContentSizeProposal.width = max(proposedWidth - verticalScrollBarWidth, 0)
         }
 
         if !axes.contains(.vertical), let proposedHeight = childProposal.height {
-            finalContentSizeProposal.height = proposedHeight - horizontalScrollBarHeight
+            finalContentSizeProposal.height = max(proposedHeight - horizontalScrollBarHeight, 0)
         }
 
         // Propose a final size to the child view.
@@ -127,18 +127,20 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
 
         // Compute the outer size.
         var outerSize = finalChildResult.size
-        if axes.contains(.horizontal) {
+        if let proposedWidth = proposedSize.width {
+            outerSize.width = proposedWidth
+        } else if axes.contains(.horizontal) {
             outerSize.width =
-                proposedSize.width
-                ?? (finalChildResult.size.width + verticalScrollBarWidth)
+                finalChildResult.size.width + verticalScrollBarWidth
         } else {
             outerSize.width += verticalScrollBarWidth
         }
 
-        if axes.contains(.vertical) {
+        if let proposedHeight = proposedSize.height {
+            outerSize.height = proposedHeight
+        } else if axes.contains(.vertical) {
             outerSize.height =
-                proposedSize.height
-                ?? (finalChildResult.size.height + horizontalScrollBarHeight)
+                finalChildResult.size.height + horizontalScrollBarHeight
         } else {
             outerSize.height += horizontalScrollBarHeight
         }
@@ -164,13 +166,22 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         backend.setSize(
             of: children.innerContainer.into(),
             to: SIMD2(
-                max(finalContentSize.vector.x, scrollViewSize.vector.x),
-                max(finalContentSize.vector.y, scrollViewSize.vector.y)
+                axes.contains(.horizontal)
+                    ? max(finalContentSize.vector.x, scrollViewSize.vector.x)
+                    : scrollViewSize.vector.x,
+                axes.contains(.vertical)
+                    ? max(finalContentSize.vector.y, scrollViewSize.vector.y)
+                    : scrollViewSize.vector.y
             )
         )
 
         let contentX: Double
-        if finalContentSize.width < scrollViewSize.width {
+        if !axes.contains(.horizontal) {
+            contentX = HorizontalAlignment.center.position(
+                ofChild: finalContentSize.width,
+                in: scrollViewSize.width
+            )
+        } else if finalContentSize.width < scrollViewSize.width {
             let alignment = axes.contains(.vertical)
                 ? HorizontalAlignment.center : HorizontalAlignment.leading
             contentX = alignment.position(
@@ -182,7 +193,12 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         }
 
         let contentY: Double
-        if finalContentSize.height < scrollViewSize.height {
+        if !axes.contains(.vertical) {
+            contentY = VerticalAlignment.center.position(
+                ofChild: finalContentSize.height,
+                in: scrollViewSize.height
+            )
+        } else if finalContentSize.height < scrollViewSize.height {
             let alignment = axes.contains(.horizontal)
                 ? VerticalAlignment.center : VerticalAlignment.top
             contentY = alignment.position(

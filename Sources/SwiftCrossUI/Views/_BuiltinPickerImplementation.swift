@@ -33,6 +33,7 @@ public struct _BuiltinPickerImplementation: TypeSafeView {
         backend: Backend
     ) -> ViewLayoutResult {
         var pickerWidget: Backend.Widget
+        var didCreatePicker = false
 
         if let picker = children.picker, children.style == self.style {
             pickerWidget = picker.widget as! Backend.Widget
@@ -43,6 +44,7 @@ public struct _BuiltinPickerImplementation: TypeSafeView {
             pickerWidget = backend.createPicker(style: style)
             children.style = self.style
             children.picker = AnyWidget(pickerWidget)
+            didCreatePicker = true
 
             backend.insert(pickerWidget, into: containerWidget, at: 0)
             backend.setPosition(ofChildAt: 0, in: containerWidget, to: .zero)
@@ -50,14 +52,23 @@ public struct _BuiltinPickerImplementation: TypeSafeView {
 
         // TODO: Implement picker sizing within SwiftCrossUI so that we can
         //   properly separate committing logic out into `commit`.
-        backend.updatePicker(
-            pickerWidget,
-            options: options,
-            environment: environment
-        ) {
-            selectedIndex.wrappedValue = $0
+        if didCreatePicker || children.options != options {
+            backend.updatePicker(
+                pickerWidget,
+                options: options,
+                environment: environment
+            ) {
+                self.selectedIndex.wrappedValue = $0
+            }
+            children.options = options
+            children.selectedIndex = nil
         }
-        backend.setSelectedOption(ofPicker: pickerWidget, to: selectedIndex.wrappedValue)
+
+        let currentSelectedIndex = selectedIndex.wrappedValue
+        if children.selectedIndex != currentSelectedIndex {
+            backend.setSelectedOption(ofPicker: pickerWidget, to: currentSelectedIndex)
+            children.selectedIndex = currentSelectedIndex
+        }
 
         // Special handling for UIKitBackend:
         // When backed by a UITableView, its natural size is -1 x -1,
@@ -93,6 +104,8 @@ final class BuiltinPickerChildren: ViewGraphNodeChildren {
     var container: AnyWidget
     var picker: AnyWidget?
     var style: BackendPickerStyle
+    var options: [String] = []
+    var selectedIndex: Int?
 
     init(container: AnyWidget, picker: AnyWidget? = nil, style: BackendPickerStyle) {
         self.container = container
