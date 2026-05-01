@@ -307,15 +307,20 @@ public protocol AppBackend: Sendable {
         environment: EnvironmentValues
     )
 
-    /// Runs an action in the app's main thread if required to perform UI updates
-    /// by the backend.
+    /// Runs an action asynchronously in the app's main thread if required to
+    /// perform UI updates by the backend.
     ///
     /// Predominantly used by ``Publisher`` to publish changes to a thread
-    /// compatible with dispatching UI updates. Can be synchronous or
-    /// asynchronous (for now).
+    /// compatible with dispatching UI updates.
     ///
     /// - Parameter action: The action to run in the main thread.
     nonisolated func runInMainThread(action: @escaping @MainActor () -> Void)
+
+    /// The backend's preferred presentation frame rate in frames per second.
+    ///
+    /// SwiftCrossUI owns animation frame scheduling; backends only provide this
+    /// as a hint.
+    nonisolated var preferredFramesPerSecond: Double { get }
 
     /// Computes the root environment for an app (e.g. by checking the system's
     /// current theme).
@@ -520,6 +525,21 @@ public protocol AppBackend: Sendable {
     ///   - widget: The widget to set the size of.
     ///   - size: The new size.
     func setSize(of widget: Widget, to size: SIMD2<Int>)
+
+    /// Sets a widget's opacity to the current frame value.
+    func setOpacity(of widget: Widget, to opacity: Double)
+
+    /// Sets a widget's transform to the current frame value.
+    func setTransform(of widget: Widget, to transform: AffineTransform)
+
+    /// Sets a widget's blur radius to the current frame value.
+    func setBlur(of widget: Widget, radius: Double)
+
+    /// Sets a widget's visibility to the current frame value.
+    func setVisibility(of widget: Widget, visible: Bool)
+
+    /// Sets a widget's z-index to the current frame value.
+    func setZIndex(of widget: Widget, to zIndex: Double)
 
     /// Creates a scrollable single-child container wrapping the given widget.
     ///
@@ -1520,6 +1540,10 @@ extension AppBackend {
         // explicitly be notified that a widget should display queued changes.
         // Most can get away with this empty default implementation.
     }
+
+    public nonisolated var preferredFramesPerSecond: Double {
+        60
+    }
 }
 
 extension AppBackend {
@@ -1585,6 +1609,26 @@ extension AppBackend {
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
         todo()
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        ignored()
+    }
+
+    public func setTransform(of widget: Widget, to transform: AffineTransform) {
+        ignored()
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        ignored()
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        ignored()
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        ignored()
     }
 
     public func createScrollContainer(for child: Widget) -> Widget {

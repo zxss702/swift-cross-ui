@@ -44,6 +44,11 @@ public final class DummyBackend: AppBackend {
         public var tag: String?
         public var cornerRadius = 0
         public var size = SIMD2<Int>.zero
+        public var opacity = 1.0
+        public var transform = SwiftCrossUI.AffineTransform.identity
+        public var blurRadius = 0.0
+        public var isVisible = true
+        public var zIndex = 0.0
         public var naturalSize: SIMD2<Int> {
             SIMD2<Int>.zero
         }
@@ -420,6 +425,29 @@ public final class DummyBackend: AppBackend {
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
         widget.size = size
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = opacity
+    }
+
+    public func setTransform(
+        of widget: Widget,
+        to transform: SwiftCrossUI.AffineTransform
+    ) {
+        widget.transform = transform
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        widget.blurRadius = radius
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        widget.isVisible = visible
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        widget.zIndex = zIndex
     }
 
     public func createScrollContainer(for child: Widget) -> Widget {
