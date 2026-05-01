@@ -75,6 +75,15 @@ extension TupleView {
     }
 }
 
+% if i == 0:
+extension ${view}: TransitionTraitProvider {
+    var transitionTrait: AnyTransition? {
+        (view0 as? TransitionTraitProvider)?.transitionTrait
+    }
+}
+
+% end
+
 % for i in range(maximum_view_count):
 %{
 view = "TupleView%d" % (i + 1)
