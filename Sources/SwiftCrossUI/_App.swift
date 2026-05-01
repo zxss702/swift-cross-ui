@@ -18,6 +18,7 @@ class _App<AppRoot: App>: ViewModelObserver {
     var cancellables: [Cancellable]
     /// The root level environment.
     var environment: EnvironmentValues
+    let graphUpdateHost = GraphUpdateHost()
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
     
@@ -29,6 +30,7 @@ class _App<AppRoot: App>: ViewModelObserver {
         backend = app.backend
         self.app = app
         self.environment = EnvironmentValues(backend: backend)
+            .with(\.graphUpdateHost, graphUpdateHost)
         self.cancellables = []
 
         dynamicPropertyUpdater = DynamicPropertyUpdater(for: app)
@@ -55,16 +57,41 @@ class _App<AppRoot: App>: ViewModelObserver {
     }
     
     func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
-        refreshSceneGraph()
+        enqueueRefreshSceneGraph(
+            backend: backend,
+            transaction: StateMutationContext.currentTransaction
+                .overlaid(by: TransactionContext.current)
+        )
+    }
+
+    func enqueueObservedChange<Backend: AppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    ) {
+        enqueueRefreshSceneGraph(backend: backend, transaction: transaction)
+    }
+
+    private func enqueueRefreshSceneGraph<Backend: AppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    ) {
+        graphUpdateHost.enqueue(
+            backend: backend,
+            transaction: transaction,
+            key: "app-root"
+        ) { [weak self] in
+            self?.refreshSceneGraph()
+        }
     }
 
     /// Runs the app using the app's selected backend.
     func run() {
         backend.runMainLoop { [self] in
             let baseEnvironment = EnvironmentValues(backend: backend)
+                .with(\.graphUpdateHost, graphUpdateHost)
             environment = backend.computeRootEnvironment(
                 defaultEnvironment: baseEnvironment
-            )
+            ).with(\.graphUpdateHost, graphUpdateHost)
 
             dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
@@ -84,10 +111,17 @@ class _App<AppRoot: App>: ViewModelObserver {
                     continue
                 }
 
-                let cancellable =
-                    value.didChange.observeAsUIUpdater(backend: backend) { [weak self] in
-                        self?.refreshSceneGraph()
+                let cancellable = value.didChange.observe { [weak self] in
+                    guard let self else {
+                        return
                     }
+                    let transaction = StateMutationContext.currentTransaction
+                        .overlaid(by: TransactionContext.current)
+                    self.enqueueRefreshSceneGraph(
+                        backend: self.backend,
+                        transaction: transaction
+                    )
+                }
                 cancellables.append(cancellable)
             }
 
@@ -101,8 +135,11 @@ class _App<AppRoot: App>: ViewModelObserver {
             backend.setRootEnvironmentChangeHandler {
                 self.environment = self.backend.computeRootEnvironment(
                     defaultEnvironment: baseEnvironment
+                ).with(\.graphUpdateHost, self.graphUpdateHost)
+                self.enqueueRefreshSceneGraph(
+                    backend: self.backend,
+                    transaction: TransactionContext.current
                 )
-                self.refreshSceneGraph()
             }
 
             let result = rootNode.updateNode(nil, environment: environment)
