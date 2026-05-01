@@ -1,4 +1,5 @@
 import CWinRT
+import Dispatch
 import Foundation
 import SwiftCrossUI
 import UWP
@@ -107,8 +108,18 @@ public final class WinUIBackend:
     }
     private var rootEnvironmentChangeHandler: (@Sendable @MainActor () -> Void)?
 
+    private final class ElementState {
+        var size: SIMD2<Int>?
+        var position: SIMD2<Int>?
+        var opacity: Double?
+        var affineTransform: SwiftCrossUI.AffineTransform?
+        var renderTransform: MatrixTransform?
+        var blurRadius: Double?
+    }
+
     var internalState: InternalState
     nonisolated(unsafe) private var dispatcherQueue: WinAppSDK.DispatcherQueue?
+    private var elementStates: [ObjectIdentifier: ElementState] = [:]
     /// WinUI only allows one dialog at a time (subsequent dialogs throw
     /// exceptions), so we limit ourselves.
     private var dialogSemaphore = DispatchSemaphore(value: 1)
@@ -119,6 +130,30 @@ public final class WinUIBackend:
 
     public init() {
         internalState = InternalState()
+    }
+
+    private func state(for element: WinUI.FrameworkElement) -> ElementState {
+        let id = ObjectIdentifier(element)
+        if let state = elementStates[id] {
+            return state
+        }
+        let state = ElementState()
+        elementStates[id] = state
+        return state
+    }
+
+    private func clearState(for element: WinUI.FrameworkElement) {
+        elementStates.removeValue(forKey: ObjectIdentifier(element))
+        if let container = element as? Canvas {
+            for index in 0..<Int(container.children.size) {
+                guard let child = container.children.getAt(UInt32(index))
+                    as? WinUI.FrameworkElement
+                else {
+                    continue
+                }
+                clearState(for: child)
+            }
+        }
     }
 
     struct Error: LocalizedError {
@@ -346,9 +381,21 @@ public final class WinUIBackend:
         _ = UWP.Launcher.launchUriAsync(WindowsFoundation.Uri(url.absoluteString))
     }
 
-    public func runInMainThread(action: @escaping @MainActor () -> Void) {
-        _ = try! dispatcherQueue!.tryEnqueue(.normal) {
+    public nonisolated func runInMainThread(action: @escaping @MainActor () -> Void) {
+        guard let dispatcherQueue else {
+            DispatchQueue.main.async {
+                action()
+            }
+            return
+        }
+
+        let enqueued = (try? dispatcherQueue.tryEnqueue(.normal) {
             MainActor.assumeIsolated(action)
+        }) ?? false
+        if !enqueued {
+            DispatchQueue.main.async {
+                action()
+            }
         }
     }
 
@@ -480,11 +527,20 @@ public final class WinUIBackend:
 
     public func removeAllChildren(of container: Widget) {
         let container = container as! Canvas
+        for index in 0..<Int(container.children.size) {
+            guard let child = container.children.getAt(UInt32(index))
+                as? WinUI.FrameworkElement
+            else {
+                continue
+            }
+            clearState(for: child)
+        }
         container.children.clear()
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         let container = container as! Canvas
+        let index = min(max(index, 0), Int(container.children.size))
         container.children.insertAt(UInt32(index), child)
     }
 
@@ -492,6 +548,11 @@ public final class WinUIBackend:
         // TODO: Find out if there's an efficient way to do this without WinUI
         //   getting annoyed at us for having the same element in the list twice.
         let container = container as! Canvas
+        let count = Int(container.children.size)
+        guard (0..<count).contains(firstIndex), (0..<count).contains(secondIndex) else {
+            logger.warning("attempted to swap container child out of bounds")
+            return
+        }
         let largerIndex = UInt32(max(firstIndex, secondIndex))
         let smallerIndex = UInt32(min(firstIndex, secondIndex))
         let element1 = container.children[Int(smallerIndex)]
@@ -504,18 +565,98 @@ public final class WinUIBackend:
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Canvas
+        guard (0..<Int(container.children.size)).contains(index) else {
+            logger.warning("attempted to remove non-existent container child")
+            return
+        }
+        if let child = container.children.getAt(UInt32(index)) as? WinUI.FrameworkElement {
+            clearState(for: child)
+        }
         container.children.removeAt(UInt32(index))
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
         let container = container as! Canvas
+        guard (0..<Int(container.children.size)).contains(index) else {
+            logger.warning("attempted to set position of non-existent container child")
+            return
+        }
         guard let child = container.children.getAt(UInt32(index)) else {
             logger.warning("child to set position of not found")
             return
         }
+        let childElement = child as? WinUI.FrameworkElement
+        guard let childElement else {
+            Canvas.setTop(child, Double(position.y))
+            Canvas.setLeft(child, Double(position.x))
+            return
+        }
 
+        let state = state(for: childElement)
+        guard state.position != position else {
+            return
+        }
+
+        state.position = position
         Canvas.setTop(child, Double(position.y))
         Canvas.setLeft(child, Double(position.x))
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        let opacity = min(max(opacity, 0), 1)
+        let state = state(for: widget)
+        guard state.opacity != opacity else {
+            return
+        }
+        state.opacity = opacity
+        widget.opacity = opacity
+    }
+
+    public func setTransform(of widget: Widget, to transform: SwiftCrossUI.AffineTransform) {
+        let state = state(for: widget)
+        guard state.affineTransform != transform else {
+            return
+        }
+        let matrixTransform = state.renderTransform ?? MatrixTransform()
+        matrixTransform.matrix = Matrix(
+            m11: transform.linearTransform.x,
+            m12: transform.linearTransform.z,
+            m21: transform.linearTransform.y,
+            m22: transform.linearTransform.w,
+            offsetX: transform.translation.x,
+            offsetY: transform.translation.y
+        )
+        if state.renderTransform == nil {
+            state.renderTransform = matrixTransform
+            widget.renderTransform = matrixTransform
+        }
+        state.affineTransform = transform
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        let radius = max(radius, 0)
+        let state = state(for: widget)
+        guard state.blurRadius != radius else {
+            return
+        }
+        state.blurRadius = radius
+        debugLogOnce(
+            """
+            [WinUIBackend] setBlur(of:radius:) is currently approximated as \
+            an immediate opacity-preserving no-op because WinUI's generated \
+            bindings do not expose ElementCompositionPreview. SCUI still owns \
+            the blur animation timeline; this backend is missing the render \
+            primitive.
+            """
+        )
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        widget.visibility = visible ? .visible : .collapsed
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        Canvas.setZIndex(widget, Int32(zIndex.rounded()))
     }
 
     public func createColorableRectangle() -> Widget {
@@ -536,6 +677,7 @@ public final class WinUIBackend:
         let visual: WinAppSDK.Visual = try! widget.getVisualInternal()
 
         let geometry = try! visual.compositor.createRoundedRectangleGeometry()!
+        let radius = max(radius, 0)
         geometry.cornerRadius = WindowsFoundation.Vector2(
             x: Float(radius),
             y: Float(radius)
@@ -543,9 +685,11 @@ public final class WinUIBackend:
 
         // We assume that SwiftCrossUI has explicitly set the size of the
         // underlying widget.
+        let width = widget.width.isFinite ? max(widget.width, 0) : 0
+        let height = widget.height.isFinite ? max(widget.height, 0) : 0
         geometry.size = WindowsFoundation.Vector2(
-            x: Float(widget.width),
-            y: Float(widget.height)
+            x: Float(width),
+            y: Float(height)
         )
 
         let clip = try! visual.compositor.createGeometricClip()!
@@ -722,6 +866,12 @@ public final class WinUIBackend:
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
+        let state = state(for: widget)
+        let size = SIMD2(max(size.x, 0), max(size.y, 0))
+        guard state.size != size else {
+            return
+        }
+        state.size = size
         widget.width = Double(size.x)
         widget.height = Double(size.y)
     }
