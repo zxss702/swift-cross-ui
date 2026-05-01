@@ -294,7 +294,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         pendingRenderKeys = []
         pendingRenderFrames = [:]
 
-        for key in keys {
+        for (offset, key) in keys.enumerated() {
             guard let frame = frames[key] else {
                 continue
             }
@@ -303,6 +303,24 @@ final class GraphUpdateHost: @unchecked Sendable {
                 RenderFrameContext.withRendering(at: time) {
                     frame.action()
                 }
+            }
+
+            if hasPendingTransactions {
+                for remainingKey in keys.dropFirst(offset + 1) {
+                    guard pendingRenderFrames[remainingKey] == nil,
+                        let frame = frames[remainingKey]
+                    else {
+                        continue
+                    }
+                    pendingRenderKeys.append(remainingKey)
+                    pendingRenderFrames[remainingKey] = frame
+                }
+
+                if let request = lastTransactionFlushRequest {
+                    request()
+                }
+                deferredRenderFlush = lastRenderFlushRequest
+                return
             }
         }
     }
