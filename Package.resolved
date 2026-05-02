@@ -1,5 +1,5 @@
 {
-  "originHash" : "01ab2009144fca678d95dbe5e5d578f9ac9674c97f99106e0174c245d39583d8",
+  "originHash" : "571905f13cc99333b34aa092e6ae1f67cde2f22281dc09e554a7ee2b2e01b415",
   "pins" : [
     {
       "identity" : "androidkit",
@@ -164,6 +164,15 @@
       }
     },
     {
+      "identity" : "swift-subprocess",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-subprocess.git",
+      "state" : {
+        "revision" : "13d087685b95d64d6aac9b94500d347bbe84c39b",
+        "version" : "0.4.0"
+      }
+    },
+    {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
@@ -224,6 +233,24 @@
       "state" : {
         "revision" : "73d5d19c39c523c92355027dd13aee445fc627a7",
         "version" : "0.1.1"
+      }
+    },
+    {
+      "identity" : "swiftjavalang",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/stackotter/SwiftJavaLang.git",
+      "state" : {
+        "revision" : "b60871fd650b81b142a1d6a62d7d440ea1e9bff7",
+        "version" : "0.2.1"
+      }
+    },
+    {
+      "identity" : "swiftkotlin",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/stackotter/SwiftKotlin.git",
+      "state" : {
+        "revision" : "f408b73ebb86a33411f27a668e2d843a10f007c2",
+        "version" : "0.2.1"
       }
     },
     {
