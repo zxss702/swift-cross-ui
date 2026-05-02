@@ -372,7 +372,7 @@ public enum LayoutSystem {
         let orientation = environment.layoutOrientation
         let perpendicularOrientation = orientation.perpendicular
 
-        if cache.redistributeSpaceOnCommit {
+        if cache.redistributeSpaceOnCommit && !RenderFrameContext.isRendering {
             _ = computeLayouts(
                 of: children,
                 proposedLength: layout.size[component: orientation],
