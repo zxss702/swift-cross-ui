@@ -494,7 +494,12 @@ public final class GtkBackend: AppBackend {
 
             let refreshRate = gdk_monitor_get_refresh_rate(OpaquePointer(monitor))
             if refreshRate > 0 {
-                return Double(refreshRate) / 1_000
+                let framesPerSecond = Double(refreshRate) / 1_000
+                if framesPerSecond >= 24 {
+                    return framesPerSecond
+                } else if refreshRate >= 24 && refreshRate <= 240 {
+                    return Double(refreshRate)
+                }
             }
         }
 
