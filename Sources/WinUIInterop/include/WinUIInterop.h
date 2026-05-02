@@ -13,8 +13,7 @@ extern "C" {
 
 double scui_get_primary_refresh_rate(void);
 double scui_get_refresh_rate_for_window(HWND hwnd);
-bool scui_set_element_blur(void *element, double radius, double width, double height);
-bool scui_update_element_blur_size(void *element, double width, double height);
+bool scui_set_element_blur(void *element, void *sourceElement, double radius, double width, double height);
 void scui_clear_element_blur(void *element);
 
 #ifdef __cplusplus

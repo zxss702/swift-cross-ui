@@ -102,6 +102,12 @@ public final class WinUIBackend: AppBackend {
         var affineTransform: SwiftCrossUI.AffineTransform?
         var renderTransform: MatrixTransform?
         var blurRadius: Double?
+        var blurApplied = false
+        var pendingBlurInstall: EventCleanup?
+
+        deinit {
+            pendingBlurInstall?.dispose()
+        }
     }
 
     private var rootEnvironmentChangeHandler: (@Sendable @MainActor () -> Void)?
@@ -148,6 +154,41 @@ public final class WinUIBackend: AppBackend {
 
     private func rawPointer(for element: WinUI.FrameworkElement) -> UnsafeMutableRawPointer {
         UnsafeMutableRawPointer(element.thisPtr.pUnk.borrow)
+    }
+
+    private func blurSource(for widget: Widget) -> WinUI.FrameworkElement {
+        guard
+            let container = widget as? Canvas,
+            container.children.size == 1,
+            let child = container.children.getAt(0) as? WinUI.FrameworkElement
+        else {
+            return widget
+        }
+        return child
+    }
+
+    private func cancelPendingBlurInstall(_ state: ElementState) {
+        state.pendingBlurInstall?.dispose()
+        state.pendingBlurInstall = nil
+    }
+
+    private func installBlurAfterLayout(for widget: Widget, radius: Double, state: ElementState) {
+        guard state.pendingBlurInstall == nil else {
+            return
+        }
+        state.pendingBlurInstall = widget.layoutUpdated.addHandler { [weak self, weak widget] _, _ in
+            guard let self, let widget else {
+                return
+            }
+            guard let state = self.elementStates[ObjectIdentifier(widget)] else {
+                return
+            }
+            guard state.blurRadius == radius, !state.blurApplied else {
+                self.cancelPendingBlurInstall(state)
+                return
+            }
+            self.setBlur(of: widget, radius: radius)
+        }
     }
 
     struct Error: LocalizedError {
@@ -639,30 +680,38 @@ public final class WinUIBackend: AppBackend {
     public func setBlur(of widget: Widget, radius: Double) {
         let radius = max(radius, 0)
         let state = state(for: widget)
-        guard state.blurRadius != radius else {
+        guard state.blurRadius != radius || !state.blurApplied else {
             return
+        }
+        if state.blurRadius != radius {
+            cancelPendingBlurInstall(state)
         }
         state.blurRadius = radius
         guard radius > 0 else {
             scui_clear_element_blur(rawPointer(for: widget))
+            state.blurApplied = false
+            cancelPendingBlurInstall(state)
             return
         }
 
         let size = state.size ?? .zero
         guard size.x > 0 && size.y > 0 else {
+            state.blurApplied = false
             return
         }
 
         let didSetBlur = scui_set_element_blur(
             rawPointer(for: widget),
+            rawPointer(for: blurSource(for: widget)),
             radius,
             Double(size.x),
             Double(size.y)
         )
-        if !didSetBlur {
-            debugLogOnce(
-                "[WinUIBackend] setBlur(of:radius:) could not create a WinUI composition blur."
-            )
+        state.blurApplied = didSetBlur
+        if didSetBlur {
+            cancelPendingBlurInstall(state)
+        } else {
+            installBlurAfterLayout(for: widget, radius: radius, state: state)
         }
     }
 
@@ -892,14 +941,21 @@ public final class WinUIBackend: AppBackend {
         if let blurRadius = state.blurRadius, blurRadius > 0 {
             guard size.x > 0 && size.y > 0 else {
                 scui_clear_element_blur(rawPointer(for: widget))
+                state.blurApplied = false
                 return
             }
-            _ = scui_set_element_blur(
+            state.blurApplied = scui_set_element_blur(
                 rawPointer(for: widget),
+                rawPointer(for: blurSource(for: widget)),
                 blurRadius,
                 Double(size.x),
                 Double(size.y)
             )
+            if state.blurApplied {
+                cancelPendingBlurInstall(state)
+            } else {
+                installBlurAfterLayout(for: widget, radius: blurRadius, state: state)
+            }
         }
     }
     
