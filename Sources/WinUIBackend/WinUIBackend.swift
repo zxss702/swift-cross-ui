@@ -143,6 +143,7 @@ public final class WinUIBackend:
     }
 
     private func clearState(for element: WinUI.FrameworkElement) {
+        scui_clear_element_blur(rawPointer(for: element))
         elementStates.removeValue(forKey: ObjectIdentifier(element))
         if let container = element as? Canvas {
             for index in 0..<Int(container.children.size) {
@@ -154,6 +155,10 @@ public final class WinUIBackend:
                 clearState(for: child)
             }
         }
+    }
+
+    private func rawPointer(for element: WinUI.FrameworkElement) -> UnsafeMutableRawPointer {
+        UnsafeMutableRawPointer(element.thisPtr.pUnk.borrow)
     }
 
     struct Error: LocalizedError {
@@ -649,15 +654,27 @@ public final class WinUIBackend:
             return
         }
         state.blurRadius = radius
-        debugLogOnce(
-            """
-            [WinUIBackend] setBlur(of:radius:) is currently approximated as \
-            an immediate opacity-preserving no-op because WinUI's generated \
-            bindings do not expose ElementCompositionPreview. SCUI still owns \
-            the blur animation timeline; this backend is missing the render \
-            primitive.
-            """
+        guard radius > 0 else {
+            scui_clear_element_blur(rawPointer(for: widget))
+            return
+        }
+
+        let size = state.size ?? .zero
+        guard size.x > 0 && size.y > 0 else {
+            return
+        }
+
+        let didSetBlur = scui_set_element_blur(
+            rawPointer(for: widget),
+            radius,
+            Double(size.x),
+            Double(size.y)
         )
+        if !didSetBlur {
+            debugLogOnce(
+                "[WinUIBackend] setBlur(of:radius:) could not create a WinUI composition blur."
+            )
+        }
     }
 
     public func setVisibility(of widget: Widget, visible: Bool) {
@@ -883,6 +900,18 @@ public final class WinUIBackend:
         state.size = size
         widget.width = Double(size.x)
         widget.height = Double(size.y)
+        if let blurRadius = state.blurRadius, blurRadius > 0 {
+            guard size.x > 0 && size.y > 0 else {
+                scui_clear_element_blur(rawPointer(for: widget))
+                return
+            }
+            _ = scui_set_element_blur(
+                rawPointer(for: widget),
+                blurRadius,
+                Double(size.x),
+                Double(size.y)
+            )
+        }
     }
     
     public func createTooltipContainer(wrapping child: Widget) -> Widget {
