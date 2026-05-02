@@ -18,12 +18,49 @@ public struct ContentTransition: Hashable, Sendable {
         self.kind = kind
     }
 
-    var animatesByOpacity: Bool {
+    var animatesContentChange: Bool {
         switch kind {
             case .identity:
                 false
             case .interpolate, .opacity, .numericText, .numericTextValue:
                 true
+        }
+    }
+
+    var changeToken: String {
+        switch kind {
+            case .identity:
+                "identity"
+            case .interpolate:
+                "interpolate"
+            case .opacity:
+                "opacity"
+            case .numericText(let countsDown):
+                "numericText:\(countsDown == true)"
+            case .numericTextValue(let value):
+                "numericTextValue:\(value)"
+        }
+    }
+
+    func numericDirection(previousValue: Double?) -> Double? {
+        switch kind {
+            case .numericText(let countsDown):
+                return countsDown == true ? -1 : 1
+            case .numericTextValue(let value):
+                guard let previousValue, value != previousValue else {
+                    return 1
+                }
+                return value > previousValue ? 1 : -1
+            case .identity, .interpolate, .opacity:
+                return nil
+        }
+    }
+
+    var numericValue: Double? {
+        if case .numericTextValue(let value) = kind {
+            value
+        } else {
+            nil
         }
     }
 
@@ -73,10 +110,12 @@ struct ContentTransitionModifierView<Content: View>: TypeSafeView {
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
     ) -> ContentTransitionChildren {
-        let view = renderedContent(phase: 1)
+        let view = AnyView(body.view0)
         return ContentTransitionChildren(
             content: view,
             fingerprint: contentTransitionFingerprint(body.view0),
+            transitionToken: transition.changeToken,
+            numericValue: transition.numericValue,
             backend: backend,
             snapshot: snapshots?.first,
             environment: environment.with(\.contentTransition, transition)
@@ -101,16 +140,50 @@ struct ContentTransitionModifierView<Content: View>: TypeSafeView {
     ) -> ViewLayoutResult {
         children.proposedSize = proposedSize
         let fingerprint = contentTransitionFingerprint(body.view0)
+        let transitionToken = transition.changeToken
         let changed = children.fingerprint != fingerprint
-        children.fingerprint = fingerprint
-        children.pendingTransition = changed && transition.animatesByOpacity
+            || children.transitionToken != transitionToken
+        let previousNumericValue = children.numericValue
+        let shouldTransition = changed
+            && transition.animatesContentChange
+            && environment.transaction.animation != nil
+            && !environment.transaction.disablesAnimations
 
-        let phase = children.pendingTransition ? 0.0 : 1.0
+        if shouldTransition {
+            children.startTransition(
+                outgoingContent: children.currentContent,
+                direction: transition.numericDirection(previousValue: previousNumericValue),
+                backend: backend,
+                environment: environment.with(\.contentTransition, transition)
+            )
+        } else {
+            children.transitionPhase = 1
+            if changed {
+                children.outgoingCleanupRequested = true
+            }
+        }
+
+        children.fingerprint = fingerprint
+        children.transitionToken = transitionToken
+        children.numericValue = transition.numericValue
+        children.currentContent = AnyView(body.view0)
+        children.pendingTransition = shouldTransition
+
+        let phase = children.pendingTransition ? 0.0 : children.transitionPhase
         let (_, result) = children.node.computeLayoutWithNewView(
-            renderedContent(phase: phase),
+            renderedIncomingContent(AnyView(body.view0), phase: phase, children: children),
             proposedSize,
             environment.with(\.contentTransition, transition)
         )
+        if let outgoingNode = children.outgoingNode,
+            let outgoingContent = children.outgoingContent
+        {
+            _ = outgoingNode.computeLayoutWithNewView(
+                renderedOutgoingContent(outgoingContent, phase: phase, children: children),
+                proposedSize,
+                environment.with(\.contentTransition, transition)
+            )
+        }
         return result
     }
 
@@ -121,26 +194,81 @@ struct ContentTransitionModifierView<Content: View>: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) {
+        syncOutgoingWidget(widget, children: children, backend: backend)
         _ = children.node.commit()
+        if let outgoingNode = children.outgoingNode {
+            _ = outgoingNode.commit()
+        }
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+        if children.outgoingWidgetInserted {
+            backend.setPosition(ofChildAt: 1, in: widget, to: .zero)
+        }
         completeTransitionIfNeeded(
+            widget,
             children: children,
             environment: environment,
             backend: backend
         )
+        cleanupOutgoingIfNeeded(widget, children: children, backend: backend)
     }
 
-    private func renderedContent(phase: Double) -> AnyView {
-        if transition.animatesByOpacity {
-            AnyView(body.view0.opacity(phase))
-        } else {
-            AnyView(body.view0)
+    private func renderedIncomingContent(
+        _ content: AnyView,
+        phase: Double,
+        children: ContentTransitionChildren
+    ) -> AnyView {
+        guard transition.animatesContentChange else {
+            return content
+        }
+        if let direction = children.transitionDirection {
+            return AnyView(
+                content
+                    .opacity(phase)
+                    .offset(y: (1 - phase) * direction * children.numericOffset)
+            )
+        }
+        return AnyView(content.opacity(phase))
+    }
+
+    private func renderedOutgoingContent(
+        _ content: AnyView,
+        phase: Double,
+        children: ContentTransitionChildren
+    ) -> AnyView {
+        if let direction = children.transitionDirection {
+            return AnyView(
+                content
+                    .opacity(1 - phase)
+                    .offset(y: -phase * direction * children.numericOffset)
+            )
+        }
+        return AnyView(content.opacity(1 - phase))
+    }
+
+    private func syncOutgoingWidget<Backend: AppBackend>(
+        _ widget: Backend.Widget,
+        children: ContentTransitionChildren,
+        backend: Backend
+    ) {
+        if children.outgoingWidgetNeedsReplacement && children.outgoingWidgetInserted {
+            backend.remove(childAt: 1, from: widget)
+            children.outgoingWidgetInserted = false
+        }
+        children.outgoingWidgetNeedsReplacement = false
+
+        guard let outgoingNode = children.outgoingNode else {
+            return
+        }
+        if !children.outgoingWidgetInserted {
+            backend.insert(outgoingNode.getWidget().into(), into: widget, at: 1)
+            children.outgoingWidgetInserted = true
         }
     }
 
     @MainActor
     private func completeTransitionIfNeeded<Backend: AppBackend>(
+        _ widget: Backend.Widget,
         children: ContentTransitionChildren,
         environment: EnvironmentValues,
         backend: Backend
@@ -150,21 +278,32 @@ struct ContentTransitionModifierView<Content: View>: TypeSafeView {
         }
 
         children.pendingTransition = false
-        let transaction = environment.transaction
+        var transaction = environment.transaction
+        if transaction.animation != nil && !transaction.disablesAnimations {
+            transaction.addAnimationCompletion { [weak children] in
+                MainActor.assumeIsolated {
+                    children?.outgoingCleanupRequested = true
+                }
+            }
+        } else {
+            children.outgoingCleanupRequested = true
+        }
         let updateEnvironment = environment
             .withCurrentTransaction(transaction)
             .with(\.contentTransition, transition)
         let update: @MainActor () -> Void = {
-            _ = children.node.computeLayoutWithNewView(
-                renderedContent(phase: 1),
-                children.proposedSize,
-                updateEnvironment
-            )
-            _ = children.node.commit()
+            children.transitionPhase = 1
+            updateEnvironment.onResize(.zero)
         }
 
         guard let graphUpdateHost = environment.graphUpdateHost else {
-            backend.runInMainThread(action: update)
+            backend.runInMainThread {
+                withTransaction(transaction) {
+                    StateMutationContext.withTransaction(transaction) {
+                        update()
+                    }
+                }
+            }
             return
         }
 
@@ -175,36 +314,97 @@ struct ContentTransitionModifierView<Content: View>: TypeSafeView {
             action: update
         )
     }
+
+    private func cleanupOutgoingIfNeeded<Backend: AppBackend>(
+        _ widget: Backend.Widget,
+        children: ContentTransitionChildren,
+        backend: Backend
+    ) {
+        guard children.outgoingCleanupRequested else {
+            return
+        }
+        children.outgoingCleanupRequested = false
+        children.outgoingNode = nil
+        children.outgoingContent = nil
+        if children.outgoingWidgetInserted {
+            backend.remove(childAt: 1, from: widget)
+            children.outgoingWidgetInserted = false
+        }
+    }
 }
 
-final class ContentTransitionChildren: ViewGraphNodeChildren {
+final class ContentTransitionChildren: ViewGraphNodeChildren, @unchecked Sendable {
     var node: ErasedViewGraphNode
     var fingerprint: String
+    var transitionToken: String
+    var numericValue: Double?
+    var currentContent: AnyView
+    var outgoingNode: ErasedViewGraphNode?
+    var outgoingContent: AnyView?
     var proposedSize = ProposedViewSize.zero
     var pendingTransition = false
+    var transitionPhase = 1.0
+    var transitionDirection: Double?
+    let numericOffset = 24.0
+    var outgoingWidgetInserted = false
+    var outgoingWidgetNeedsReplacement = false
+    var outgoingCleanupRequested = false
 
     var widgets: [AnyWidget] {
-        [node.getWidget()]
+        if let outgoingNode {
+            [node.getWidget(), outgoingNode.getWidget()]
+        } else {
+            [node.getWidget()]
+        }
     }
 
     var erasedNodes: [ErasedViewGraphNode] {
-        [node]
+        if let outgoingNode {
+            [node, outgoingNode]
+        } else {
+            [node]
+        }
     }
 
     init<Backend: AppBackend>(
         content: AnyView,
         fingerprint: String,
+        transitionToken: String,
+        numericValue: Double?,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,
         environment: EnvironmentValues
     ) {
+        currentContent = content
         self.fingerprint = fingerprint
+        self.transitionToken = transitionToken
+        self.numericValue = numericValue
         node = ErasedViewGraphNode(
             for: content,
             backend: backend,
             snapshot: snapshot,
             environment: environment
         )
+    }
+
+    func startTransition<Backend: AppBackend>(
+        outgoingContent: AnyView,
+        direction: Double?,
+        backend: Backend,
+        environment: EnvironmentValues
+    ) {
+        if outgoingNode != nil {
+            outgoingWidgetNeedsReplacement = true
+        }
+        self.outgoingContent = outgoingContent
+        outgoingNode = ErasedViewGraphNode(
+            for: outgoingContent,
+            backend: backend,
+            environment: environment
+        )
+        transitionPhase = 0
+        transitionDirection = direction
+        outgoingCleanupRequested = false
     }
 }
 
