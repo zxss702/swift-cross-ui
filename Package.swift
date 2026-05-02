@@ -331,7 +331,13 @@ let package = Package(
         ),
         .target(
             name: "WinUIInterop",
-            dependencies: []
+            dependencies: [
+                .product(
+                    name: "CWinAppSDK",
+                    package: "swift-windowsappsdk",
+                    condition: .when(platforms: [.windows])
+                ),
+            ]
         ),
         .target(name: "DummyBackend", dependencies: ["SwiftCrossUI"]),
 
