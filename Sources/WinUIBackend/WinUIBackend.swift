@@ -202,6 +202,27 @@ public final class WinUIBackend:
         }
     }
 
+    private func applyBlur(of widget: Widget, radius: Double, state: ElementState) {
+        let size = state.size ?? .zero
+        guard size.x > 0 && size.y > 0 else {
+            state.blurApplied = false
+            return
+        }
+
+        state.blurApplied = scui_set_element_blur(
+            rawPointer(for: widget),
+            rawPointer(for: blurSource(for: widget)),
+            radius,
+            Double(size.x),
+            Double(size.y)
+        )
+        if state.blurApplied {
+            cancelPendingBlurInstall(state)
+        } else {
+            installBlurAfterLayout(for: widget, radius: radius, state: state)
+        }
+    }
+
     struct Error: LocalizedError {
         var message: String
 
@@ -705,25 +726,7 @@ public final class WinUIBackend:
             return
         }
 
-        let size = state.size ?? .zero
-        guard size.x > 0 && size.y > 0 else {
-            state.blurApplied = false
-            return
-        }
-
-        let didSetBlur = scui_set_element_blur(
-            rawPointer(for: widget),
-            rawPointer(for: blurSource(for: widget)),
-            radius,
-            Double(size.x),
-            Double(size.y)
-        )
-        state.blurApplied = didSetBlur
-        if didSetBlur {
-            cancelPendingBlurInstall(state)
-        } else {
-            installBlurAfterLayout(for: widget, radius: radius, state: state)
-        }
+        applyBlur(of: widget, radius: radius, state: state)
     }
 
     public func setVisibility(of widget: Widget, visible: Bool) {
@@ -953,20 +956,10 @@ public final class WinUIBackend:
             guard size.x > 0 && size.y > 0 else {
                 scui_clear_element_blur(rawPointer(for: widget))
                 state.blurApplied = false
+                cancelPendingBlurInstall(state)
                 return
             }
-            state.blurApplied = scui_set_element_blur(
-                rawPointer(for: widget),
-                rawPointer(for: blurSource(for: widget)),
-                blurRadius,
-                Double(size.x),
-                Double(size.y)
-            )
-            if state.blurApplied {
-                cancelPendingBlurInstall(state)
-            } else {
-                installBlurAfterLayout(for: widget, radius: blurRadius, state: state)
-            }
+            applyBlur(of: widget, radius: blurRadius, state: state)
         }
     }
     

@@ -1007,29 +1007,6 @@ bool scui_set_element_blur(
     return scui_update_blur_state_size(state, width, height, clampedRadius);
 }
 
-bool scui_update_element_blur_size(
-    void *element,
-    double width,
-    double height
-) {
-    IUnknown *identity = nullptr;
-    if (FAILED(scui_get_blur_identity(element, &identity))) {
-        return false;
-    }
-
-    auto iterator = scui_blur_states.find(identity);
-    identity->Release();
-    if (iterator == scui_blur_states.end()) {
-        return true;
-    }
-    return scui_update_blur_state_size(
-        *iterator->second,
-        width,
-        height,
-        iterator->second->radius
-    );
-}
-
 void scui_clear_element_blur(void *element) {
     IUnknown *identity = nullptr;
     if (FAILED(scui_get_blur_identity(element, &identity))) {
