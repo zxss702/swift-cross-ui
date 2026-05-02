@@ -14,4 +14,10 @@ class AndroidBackendHelpers: JavaObject {
 
     @JavaMethod
     func getWindowHeight(_ activity: Activity?) -> Int32
+
+    @JavaMethod
+    func getPreferredFramesPerSecond(_ activity: Activity?) -> Float
+
+    @JavaMethod
+    func runOnMainThread(_ action: SwiftAction?)
 }

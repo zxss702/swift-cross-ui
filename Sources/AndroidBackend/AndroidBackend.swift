@@ -107,11 +107,15 @@ public final class AndroidBackend: BackendFeatures.BaseStubs {
     static var env: UnsafeMutablePointer<JNIEnv?>!
     /// The main activity. Set by ``entrypoint``.
     static var activity: Activity!
+    nonisolated(unsafe) private static var cachedPreferredFramesPerSecond = 60.0
 
     var helpers: AndroidBackendHelpers
 
     public init() {
         helpers = AndroidBackendHelpers(environment: Self.env)
+        Self.cachedPreferredFramesPerSecond = Double(
+            helpers.getPreferredFramesPerSecond(Self.activity)
+        )
     }
 
     public func runMainLoop(
@@ -193,9 +197,16 @@ public final class AndroidBackend: BackendFeatures.BaseStubs {
     //    }
 
     public func runInMainThread(action: @escaping @MainActor () -> Void) {
-        Task { @MainActor in
-            action()
+        let swiftAction = SwiftAction(environment: Self.env) {
+            MainActor.assumeIsolated {
+                action()
+            }
         }
+        helpers.runOnMainThread(swiftAction)
+    }
+
+    public nonisolated var preferredFramesPerSecond: Double {
+        Self.cachedPreferredFramesPerSecond
     }
 
     public func computeRootEnvironment(defaultEnvironment: EnvironmentValues) -> EnvironmentValues {
@@ -229,8 +240,10 @@ public final class AndroidBackend: BackendFeatures.BaseStubs {
     public func show(widget: Widget) {}
 
     public func createContainer() -> Widget {
-        RelativeLayout(Self.activity, environment: Self.env)
-            .as(AndroidKit.View.self)!
+        let container = RelativeLayout(Self.activity, environment: Self.env)
+        container.setClipChildren(false)
+        container.setClipToPadding(false)
+        return container.as(AndroidKit.View.self)!
     }
 
     public func removeAllChildren(of container: Widget) {
@@ -290,11 +303,69 @@ public final class AndroidBackend: BackendFeatures.BaseStubs {
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
         let layoutParams = widget.getLayoutParams()!
-        layoutParams.width = Int32(size.x)
-        layoutParams.height = Int32(size.y)
+        layoutParams.width = Int32(max(size.x, 0))
+        layoutParams.height = Int32(max(size.y, 0))
         widget.setLayoutParams(layoutParams)
         
         // TODO(stackotter): Use density-adaptive units everywhere
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.setAlpha(Float(min(max(opacity, 0), 1)))
+    }
+
+    public func setTransform(of widget: Widget, to transform: SwiftCrossUI.AffineTransform) {
+        guard currentSDKVersion() >= 29 else {
+            widget.setTranslationX(Float(transform.translation.x))
+            widget.setTranslationY(Float(transform.translation.y))
+            return
+        }
+
+        guard transform != .identity else {
+            widget.setAnimationMatrix(nil)
+            return
+        }
+
+        let matrix = Matrix(environment: Self.env)
+        matrix.setValues([
+            Float(transform.linearTransform.x),
+            Float(transform.linearTransform.y),
+            Float(transform.translation.x),
+            Float(transform.linearTransform.z),
+            Float(transform.linearTransform.w),
+            Float(transform.translation.y),
+            0,
+            0,
+            1,
+        ])
+        widget.setAnimationMatrix(matrix)
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        let radius = max(radius, 0)
+        guard radius > 0 else {
+            widget.setRenderEffect(nil)
+            return
+        }
+        guard currentSDKVersion() >= 31 else {
+            return
+        }
+
+        let renderEffectClass = try! JavaClass<RenderEffect>(environment: Self.env)
+        let tileMode = Shader.TileMode(.CLAMP, environment: Self.env)
+        let effect = renderEffectClass.createBlurEffect(
+            Float(radius),
+            Float(radius),
+            tileMode
+        )
+        widget.setRenderEffect(effect)
+    }
+
+    private func currentSDKVersion() -> Int32 {
+        guard let versionClass = try? JavaClass<Build.VERSION>(environment: Self.env) else {
+            return 0
+        }
+        return versionClass.SDK_INT
     }
 
     public func createButton() -> Widget {
