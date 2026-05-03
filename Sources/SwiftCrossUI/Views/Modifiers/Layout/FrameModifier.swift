@@ -182,6 +182,20 @@ struct StrictFrameView<Child: View>: TypeSafeView {
     }
 }
 
+extension StrictFrameView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: body.view0,
+            values: [
+                AnyHashable(width),
+                AnyHashable(height),
+                AnyHashable(String(describing: alignment)),
+            ]
+        )
+    }
+}
+
 /// The implementation for the ``View/frame(width:height:)`` view modifier.
 struct FlexibleFrameView<Child: View>: TypeSafeView {
     var body: TupleView1<Child>
@@ -349,5 +363,23 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         )
         backend.setSize(of: widget, to: frameSize.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: childPosition)
+    }
+}
+
+extension FlexibleFrameView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: body.view0,
+            values: [
+                AnyHashable(minWidth),
+                AnyHashable(idealWidth),
+                AnyHashable(maxWidth),
+                AnyHashable(minHeight),
+                AnyHashable(idealHeight),
+                AnyHashable(maxHeight),
+                AnyHashable(String(describing: alignment)),
+            ]
+        )
     }
 }

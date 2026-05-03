@@ -27,6 +27,18 @@ public struct Button: Sendable {
 
 extension Button: View {}
 
+extension Button: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(
+            Self.self,
+            values: [
+                AnyHashable(label),
+                AnyHashable(width),
+            ]
+        )
+    }
+}
+
 extension Button: ElementaryView {
     public func asWidget<Backend: BaseAppBackend>(backend: Backend) -> Backend.Widget {
         return backend.createButton()

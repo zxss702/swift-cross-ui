@@ -71,3 +71,9 @@ public struct Group<Content: View>: View {
         (children as? TupleViewChildren)?.stackLayoutCache = cache
     }
 }
+
+extension Group: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body)
+    }
+}

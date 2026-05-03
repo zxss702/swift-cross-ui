@@ -108,3 +108,16 @@ public struct Slider: ElementaryView, View {
         backend.setSize(of: widget, to: layout.size.vector)
     }
 }
+
+extension Slider: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(
+            Self.self,
+            values: [
+                AnyHashable(range.lowerBound),
+                AnyHashable(range.upperBound),
+                AnyHashable(decimalPlaces),
+            ]
+        )
+    }
+}

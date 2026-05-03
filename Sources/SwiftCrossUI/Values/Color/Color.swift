@@ -94,3 +94,9 @@ extension Color: ElementaryView {
         backend.setColor(ofColorableRectangle: widget, to: self.resolve(in: environment))
     }
 }
+
+extension Color: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self)
+    }
+}

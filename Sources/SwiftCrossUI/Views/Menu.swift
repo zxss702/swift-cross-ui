@@ -206,6 +206,19 @@ extension Menu: TypeSafeView {
     }
 }
 
+@available(iOS 14, macCatalyst 14, tvOS 17, *)
+extension Menu: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(
+            Self.self,
+            values: [
+                AnyHashable(label),
+                AnyHashable(buttonWidth),
+            ]
+        )
+    }
+}
+
 class MenuStorage: ViewGraphNodeChildren {
     var menu: Any?
 
