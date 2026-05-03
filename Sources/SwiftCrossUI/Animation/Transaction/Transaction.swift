@@ -19,6 +19,7 @@ public struct Transaction: @unchecked Sendable {
         }
     }
     public var disablesAnimations: Bool
+    public var disablesContentTransitions: Bool
     public var isContinuous: Bool
     public var tracksVelocity: Bool
     public var scrollTargetAnchor: UnitPoint?
@@ -28,6 +29,7 @@ public struct Transaction: @unchecked Sendable {
     public init() {
         animation = nil
         disablesAnimations = false
+        disablesContentTransitions = false
         isContinuous = false
         tracksVelocity = false
         scrollTargetAnchor = nil
@@ -70,6 +72,7 @@ public struct Transaction: @unchecked Sendable {
             || !animationCompletionStorages.isEmpty
             || hasAnimationOverride
             || disablesAnimations
+            || disablesContentTransitions
             || isContinuous
             || tracksVelocity
             || scrollTargetAnchor != nil
@@ -92,6 +95,8 @@ public struct Transaction: @unchecked Sendable {
         }
         transaction.disablesAnimations = transaction.disablesAnimations
             || override.disablesAnimations
+        transaction.disablesContentTransitions = transaction.disablesContentTransitions
+            || override.disablesContentTransitions
         transaction.isContinuous = transaction.isContinuous || override.isContinuous
         transaction.tracksVelocity = transaction.tracksVelocity || override.tracksVelocity
         transaction.scrollTargetAnchor = override.scrollTargetAnchor
@@ -111,6 +116,7 @@ public struct Transaction: @unchecked Sendable {
         var transaction = overlaid(by: override)
         if override.hasOverrides {
             transaction.disablesAnimations = override.disablesAnimations
+            transaction.disablesContentTransitions = override.disablesContentTransitions
         }
         return transaction
     }
