@@ -61,7 +61,7 @@ struct OpacityEffectView<Content: View>: TypeSafeView {
         _ = children.child.commit()
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
-        let target = children.targetValue ?? opacity
+        let target = opacity
         let presentation = children.animation.value(
             for: target,
             transaction: environment.transaction,
@@ -70,5 +70,11 @@ struct OpacityEffectView<Content: View>: TypeSafeView {
             environment.requestRenderFrame(transaction)
         }
         backend.setOpacity(of: widget, to: presentation)
+    }
+}
+
+extension OpacityEffectView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body.view0)
     }
 }

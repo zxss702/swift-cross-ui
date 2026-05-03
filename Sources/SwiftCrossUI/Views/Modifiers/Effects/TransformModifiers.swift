@@ -102,7 +102,7 @@ struct OffsetEffectView<Content: View>: TypeSafeView {
     ) {
         _ = children.child.commit()
         backend.setSize(of: widget, to: layout.size.vector)
-        let target = children.targetValue ?? AnimatablePair(offset.x, offset.y)
+        let target = AnimatablePair(offset.x, offset.y)
         let presentation = children.animation.value(
             for: target,
             transaction: environment.transaction,
@@ -115,6 +115,12 @@ struct OffsetEffectView<Content: View>: TypeSafeView {
             in: widget,
             to: Position(presentation.first, presentation.second).vector
         )
+    }
+}
+
+extension OffsetEffectView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body.view0)
     }
 }
 
@@ -177,7 +183,7 @@ struct TransformEffectView<Content: View>: TypeSafeView {
         _ = children.child.commit()
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
-        let target = children.targetValue ?? anchoredTransform(in: layout.size)
+        let target = anchoredTransform(in: layout.size)
         let presentation = children.animation.value(
             for: target,
             transaction: environment.transaction,
@@ -202,6 +208,12 @@ struct TransformEffectView<Content: View>: TypeSafeView {
             .followedBy(
                 .translation(x: anchorPosition.x, y: anchorPosition.y)
             )
+    }
+}
+
+extension TransformEffectView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body.view0)
     }
 }
 
@@ -261,7 +273,7 @@ struct BlurEffectView<Content: View>: TypeSafeView {
         _ = children.child.commit()
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
-        let target = children.targetValue ?? radius
+        let target = radius
         let presentation = children.animation.value(
             for: target,
             transaction: environment.transaction,
@@ -270,6 +282,12 @@ struct BlurEffectView<Content: View>: TypeSafeView {
             environment.requestRenderFrame(transaction)
         }
         backend.setBlur(of: widget, radius: presentation)
+    }
+}
+
+extension BlurEffectView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body.view0)
     }
 }
 
@@ -324,5 +342,11 @@ struct ZIndexEffectView<Content: View>: TypeSafeView {
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
         backend.setZIndex(of: widget, to: zIndex)
+    }
+}
+
+extension ZIndexEffectView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body.view0)
     }
 }
