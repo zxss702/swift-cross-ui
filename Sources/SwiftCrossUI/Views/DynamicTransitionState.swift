@@ -5,20 +5,18 @@ final class DynamicTransitionState {
     var activeNode: ErasedViewGraphNode?
     var activeContent: DynamicTransitionContent?
     var activePhase: TransitionPhase = .identity
-    var removalNode: ErasedViewGraphNode?
-    var removalContent: DynamicTransitionContent?
+    private var removals: [RemovalTransition] = []
     var proposedSize = ProposedViewSize.zero
     var widgetNeedsRebuild = false
-    var removalIsScheduled = false
     var removalGeneration = 0
     var hasMounted = false
 
     var widgets: [AnyWidget] {
-        [removalNode, activeNode].compactMap { $0?.getWidget() }
+        removals.map { $0.node.getWidget() } + [activeNode].compactMap { $0?.getWidget() }
     }
 
     var erasedNodes: [ErasedViewGraphNode] {
-        [removalNode, activeNode].compactMap { $0 }
+        removals.map(\.node) + [activeNode].compactMap { $0 }
     }
 
     func update<Backend: AppBackend>(
@@ -36,25 +34,23 @@ final class DynamicTransitionState {
             )
         }
 
-        if removalContent?.identity == content.identity, activeNode == nil {
-            activeNode = removalNode
-            activeContent = content
-            removalNode = nil
-            removalContent = nil
-            removalIsScheduled = false
-            activePhase = .identity
-            widgetNeedsRebuild = true
-        }
-
         if activeContent?.identity != content.identity {
+            let revivedRemoval = removals
+                .lastIndex { $0.content.identity == content.identity }
+                .map { removals.remove(at: $0) }
             moveActiveNodeToRemovalIfNeeded(environment: environment)
-            let initialPhase = insertionPhase(for: content, environment: environment)
-            activePhase = initialPhase
-            activeNode = ErasedViewGraphNode(
-                for: renderedView(for: content, phase: initialPhase),
-                backend: backend,
-                environment: environment
-            )
+            if let revivedRemoval {
+                activeNode = revivedRemoval.node
+                activePhase = .identity
+            } else {
+                let initialPhase = insertionPhase(for: content, environment: environment)
+                activePhase = initialPhase
+                activeNode = ErasedViewGraphNode(
+                    for: renderedView(for: content, phase: initialPhase),
+                    backend: backend,
+                    environment: environment
+                )
+            }
             activeContent = content
             widgetNeedsRebuild = true
         } else {
@@ -89,7 +85,9 @@ final class DynamicTransitionState {
             widgetNeedsRebuild = false
         }
 
-        _ = removalNode?.commit()
+        for removal in removals {
+            _ = removal.node.commit()
+        }
         _ = activeNode?.commit()
 
         backend.setSize(of: widget, to: layout.size.vector)
@@ -132,14 +130,14 @@ final class DynamicTransitionState {
         }
 
         if transitionDuration(for: content, environment: environment) > 0 {
-            removalNode = node
-            removalContent = content
-            removalIsScheduled = false
             removalGeneration += 1
-        } else {
-            removalNode = nil
-            removalContent = nil
-            removalIsScheduled = false
+            removals.append(
+                RemovalTransition(
+                    id: removalGeneration,
+                    node: node,
+                    content: content
+                )
+            )
         }
 
         activeNode = nil
@@ -153,15 +151,19 @@ final class DynamicTransitionState {
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues
     ) -> ViewLayoutResult? {
-        guard let removalNode, let removalContent else {
+        guard !removals.isEmpty else {
             return nil
         }
 
-        return removalNode.computeLayoutWithNewView(
-            renderedView(for: removalContent, phase: .didDisappear),
-            proposedSize,
-            transitionEnvironment(for: removalContent, environment: environment)
-        ).size
+        var result: ViewLayoutResult?
+        for removal in removals {
+            result = removal.node.computeLayoutWithNewView(
+                renderedView(for: removal.content, phase: .didDisappear),
+                proposedSize,
+                transitionEnvironment(for: removal.content, environment: environment)
+            ).size
+        }
+        return result
     }
 
     private func scheduleRemovalIfNeeded<Backend: AppBackend>(
@@ -169,43 +171,37 @@ final class DynamicTransitionState {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        guard removalNode != nil, !removalIsScheduled, let content = removalContent else {
-            return
-        }
-
-        removalIsScheduled = true
-        let generation = removalGeneration
-        let duration = transitionDuration(for: content, environment: environment)
-        let remove: @MainActor @Sendable () -> Void = {
-            guard self.removalGeneration == generation else {
-                return
+        for index in removals.indices where !removals[index].isScheduled {
+            removals[index].isScheduled = true
+            let id = removals[index].id
+            let content = removals[index].content
+            let duration = transitionDuration(for: content, environment: environment)
+            let remove: @MainActor @Sendable () -> Void = {
+                self.removals.removeAll { $0.id == id }
+                self.widgetNeedsRebuild = true
+                self.requestGraphUpdate(environment: environment, backend: backend)
             }
-            self.removalNode = nil
-            self.removalContent = nil
-            self.removalIsScheduled = false
-            self.widgetNeedsRebuild = true
-            self.requestGraphUpdate(environment: environment, backend: backend)
-        }
 
-        guard duration > 0 else {
-            remove()
-            return
-        }
-
-        guard let graphUpdateHost = environment.graphUpdateHost else {
-            backend.runInMainThread {
+            guard duration > 0 else {
                 remove()
+                continue
             }
-            return
-        }
 
-        graphUpdateHost.enqueueAfter(
-            backend: backend,
-            delay: duration,
-            transaction: environment.transaction,
-            key: AnyHashable(ObjectIdentifier(self)),
-            action: remove
-        )
+            guard let graphUpdateHost = environment.graphUpdateHost else {
+                backend.runInMainThread {
+                    remove()
+                }
+                continue
+            }
+
+            graphUpdateHost.enqueueAfter(
+                backend: backend,
+                delay: duration,
+                transaction: environment.transaction,
+                key: AnyHashable("\(ObjectIdentifier(self)):\(id)"),
+                action: remove
+            )
+        }
     }
 
     private func scheduleInsertionUpdateIfNeeded<Backend: AppBackend>(
@@ -290,4 +286,11 @@ final class DynamicTransitionState {
         }
         return environment.withCurrentTransaction(transaction)
     }
+}
+
+private struct RemovalTransition {
+    var id: Int
+    var node: ErasedViewGraphNode
+    var content: DynamicTransitionContent
+    var isScheduled = false
 }
