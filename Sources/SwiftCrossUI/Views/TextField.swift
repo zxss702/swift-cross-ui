@@ -140,3 +140,9 @@ public struct TextField: ElementaryView, View {
         backend.setSize(of: widget, to: layout.size.vector)
     }
 }
+
+extension TextField: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self, values: [AnyHashable(placeholder)])
+    }
+}

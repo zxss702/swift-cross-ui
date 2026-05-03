@@ -41,3 +41,9 @@ struct Checkbox: ElementaryView, View {
         backend.setState(ofCheckbox: widget, to: active.wrappedValue)
     }
 }
+
+extension Checkbox: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self)
+    }
+}

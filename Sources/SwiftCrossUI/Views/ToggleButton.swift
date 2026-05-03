@@ -48,3 +48,9 @@ struct ToggleButton: ElementaryView, View {
         backend.setState(ofToggle: widget, to: active.wrappedValue)
     }
 }
+
+extension ToggleButton: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self, values: [AnyHashable(label)])
+    }
+}

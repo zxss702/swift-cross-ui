@@ -40,3 +40,9 @@ struct ToggleSwitch: ElementaryView, View {
         backend.setState(ofSwitch: widget, to: active.wrappedValue)
     }
 }
+
+extension ToggleSwitch: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self)
+    }
+}

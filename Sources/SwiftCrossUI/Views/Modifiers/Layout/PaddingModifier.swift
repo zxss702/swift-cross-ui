@@ -172,3 +172,18 @@ struct PaddingModifierView<Child: View>: TypeSafeView {
         backend.setPosition(ofChildAt: 0, in: container, to: childPosition)
     }
 }
+
+extension PaddingModifierView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: body.view0,
+            values: [
+                AnyHashable(insets.top),
+                AnyHashable(insets.trailing),
+                AnyHashable(insets.bottom),
+                AnyHashable(insets.leading),
+            ]
+        )
+    }
+}

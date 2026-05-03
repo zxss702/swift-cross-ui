@@ -88,3 +88,16 @@ public struct HStack<Content: View>: View {
         (children as? TupleViewChildren)?.stackLayoutCache = cache
     }
 }
+
+extension HStack: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: body,
+            values: [
+                AnyHashable(spacing),
+                AnyHashable(String(describing: alignment)),
+            ]
+        )
+    }
+}

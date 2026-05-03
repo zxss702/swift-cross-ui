@@ -50,3 +50,9 @@ public struct Spacer: ElementaryView, View {
         // Spacers are invisible so we don't have to update anything.
     }
 }
+
+extension Spacer: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self, values: [AnyHashable(minLength)])
+    }
+}

@@ -77,6 +77,19 @@ public struct ProgressView<Label: View>: View {
     }
 }
 
+extension ProgressView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: label,
+            values: [
+                AnyHashable(String(describing: kind)),
+                AnyHashable(isSpinnerResizable),
+            ]
+        )
+    }
+}
+
 extension ProgressView where Label == EmptyView {
     /// Creates an indeterminate progress view (a spinner).
     public init() {
@@ -198,6 +211,12 @@ struct ProgressSpinnerView: ElementaryView {
     }
 }
 
+extension ProgressSpinnerView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self, values: [AnyHashable(isResizable)])
+    }
+}
+
 struct ProgressBarView: ElementaryView {
     /// The ideal width of a ProgressBarView.
     static let idealWidth: Double = 100
@@ -235,5 +254,11 @@ struct ProgressBarView: ElementaryView {
     ) {
         backend.updateProgressBar(widget, progressFraction: value, environment: environment)
         backend.setSize(of: widget, to: layout.size.vector)
+    }
+}
+
+extension ProgressBarView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self)
     }
 }

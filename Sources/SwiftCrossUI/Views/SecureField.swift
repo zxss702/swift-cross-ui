@@ -81,3 +81,9 @@ public struct SecureField: ElementaryView, View {
         backend.setSize(of: widget, to: layout.size.vector)
     }
 }
+
+extension SecureField: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self, values: [AnyHashable(placeholder)])
+    }
+}

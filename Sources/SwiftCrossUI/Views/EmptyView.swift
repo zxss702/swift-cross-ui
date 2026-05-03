@@ -63,6 +63,12 @@ public struct EmptyView: View, Sendable {
     ) {}
 }
 
+extension EmptyView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self)
+    }
+}
+
 /// The children of a node with no children.
 public struct EmptyViewChildren: ViewGraphNodeChildren {
     public let widgets: [AnyWidget] = []
