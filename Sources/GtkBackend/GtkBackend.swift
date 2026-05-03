@@ -944,6 +944,94 @@ public final class GtkBackend:
         return SIMD2(width, imposedHeight)
     }
 
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        let ellipsize: EllipsizeMode
+        if let widget = widget as? CustomLabel {
+            ellipsize = widget.ellipsize
+        } else if widget is TextView {
+            ellipsize = .none
+        } else {
+            return nil
+        }
+
+        let pangoContext = gtk_widget_create_pango_context(widget.widgetPointer)!
+        let layout = pango_layout_new(pangoContext)!
+        defer {
+            g_object_unref(UnsafeMutableRawPointer(layout))
+            g_object_unref(UnsafeMutableRawPointer(pangoContext))
+        }
+
+        pango_layout_set_text(layout, text, Int32(text.utf8.count))
+        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR)
+        pango_layout_set_ellipsize(
+            layout,
+            (proposedHeight == nil ? EllipsizeMode.none : ellipsize).toGtk()
+        )
+        if let proposedWidth {
+            pango_layout_set_width(
+                layout,
+                Int32((Double(proposedWidth) * Double(PANGO_SCALE)).rounded(.towardZero))
+            )
+        }
+        if let proposedHeight {
+            pango_layout_set_height(
+                layout,
+                Int32((Double(proposedHeight) * Double(PANGO_SCALE)).rounded(.towardZero))
+            )
+        }
+
+        return textLayoutFragments(of: text, in: layout)
+    }
+
+    private func textLayoutFragments(
+        of text: String,
+        in layout: OpaquePointer
+    ) -> [TextLayoutFragment] {
+        var fragments: [TextLayoutFragment] = []
+        var characterIndex = 0
+        var byteIndex = 0
+        var lowerBound = text.startIndex
+
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            var rect = PangoRectangle()
+            pango_layout_index_to_pos(layout, Int32(byteIndex), &rect)
+
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(
+                        Int((Double(rect.x) / Double(PANGO_SCALE)).rounded(.down)),
+                        Int((Double(rect.y) / Double(PANGO_SCALE)).rounded(.down))
+                    ),
+                    size: SIMD2(
+                        max(1, Int((Double(rect.width) / Double(PANGO_SCALE)).rounded(.up))),
+                        max(1, Int((Double(rect.height) / Double(PANGO_SCALE)).rounded(.up)))
+                    ),
+                    baseline: 0
+                )
+            )
+
+            byteIndex += text[range].utf8.count
+            characterIndex += 1
+            lowerBound = upperBound
+        }
+
+        return fragments
+    }
+
     public func createImageView() -> Widget {
         let imageView = Gtk.Picture()
         imageView.keepAspectRatio = false

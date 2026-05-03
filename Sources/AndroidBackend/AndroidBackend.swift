@@ -462,6 +462,64 @@ public final class AndroidBackend: BackendFeatures.BaseStubs {
         let height = widget.getMeasuredHeight()
         return SIMD2(Int(width), Int(height))
     }
+
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        let textView = widget.as(AndroidKit.TextView.self)!
+        updateTextView(widget, content: text, environment: environment)
+        let metrics = helpers.textLayoutFragmentMetrics(
+            textView,
+            text,
+            Int32(proposedWidth ?? 0)
+        )
+        guard metrics.count >= (text.utf16.count + 1) * 6 else {
+            return nil
+        }
+
+        var fragments: [TextLayoutFragment] = []
+        fragments.reserveCapacity(text.count)
+        var characterIndex = 0
+        var utf16Offset = 0
+        var lowerBound = text.startIndex
+
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            let nextOffset = utf16Offset + text[range].utf16.count
+            let startBase = utf16Offset * 6
+            let endBase = nextOffset * 6
+            let line = metrics[startBase + 4]
+            let startX = metrics[startBase]
+            let endX = metrics[endBase + 4] == line ? metrics[endBase] : metrics[startBase + 5]
+            let top = metrics[startBase + 1]
+            let bottom = metrics[startBase + 3]
+
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(Int(startX), Int(top)),
+                    size: SIMD2(max(1, Int(endX - startX)), max(1, Int(bottom - top))),
+                    baseline: Int(metrics[startBase + 2])
+                )
+            )
+
+            characterIndex += 1
+            utf16Offset = nextOffset
+            lowerBound = upperBound
+        }
+
+        return fragments
+    }
 }
     
 // MARK: Picker

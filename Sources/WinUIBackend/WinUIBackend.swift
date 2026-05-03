@@ -1009,6 +1009,117 @@ public final class WinUIBackend:
         return size
     }
 
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty, let textBlock = widget as? TextBlock else {
+            return text.isEmpty ? [] : nil
+        }
+
+        guard let parent = textBlock.parent as? Canvas else {
+            return nil
+        }
+
+        updateTextView(measurementTextBlock, content: text, environment: environment)
+        measurementTextBlock.textWrapping = textBlock.textWrapping
+        measurementTextBlock.textAlignment = textBlock.textAlignment
+        let measuredSize = Self.measure(
+            measurementTextBlock,
+            proposedWidth: proposedWidth,
+            proposedHeight: proposedHeight
+        )
+
+        let layoutWidth = max(1, proposedWidth ?? measuredSize.x)
+        let layoutHeight = max(1, proposedHeight ?? measuredSize.y)
+        let measurementBox = TextBox()
+        measurementBox.text = text
+        measurementBox.textWrapping = textBlock.textWrapping
+        measurementBox.textAlignment = textBlock.textAlignment
+        measurementBox.padding = Thickness(left: 0, top: 0, right: 0, bottom: 0)
+        measurementBox.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
+        measurementBox.isReadOnly = true
+        measurementBox.acceptsReturn = true
+        measurementBox.opacity = 0
+        measurementBox.isHitTestVisible = false
+        measurementBox.width = Double(layoutWidth)
+        measurementBox.height = Double(layoutHeight)
+        environment.apply(to: measurementBox)
+
+        let childIndex = parent.children.size
+        parent.children.insertAt(childIndex, measurementBox)
+        Canvas.setLeft(measurementBox, -100_000)
+        Canvas.setTop(measurementBox, -100_000)
+        defer {
+            if parent.children.size > childIndex {
+                parent.children.removeAt(childIndex)
+            }
+        }
+
+        let layoutSize = WindowsFoundation.Size(
+            width: Float(layoutWidth),
+            height: Float(layoutHeight)
+        )
+        try? measurementBox.measure(layoutSize)
+        try? measurementBox.arrange(
+            WindowsFoundation.Rect(x: 0, y: 0, width: layoutSize.width, height: layoutSize.height)
+        )
+        try? measurementBox.updateLayout()
+        guard (try? measurementBox.getRectFromCharacterIndex(0, false)) != nil else {
+            return nil
+        }
+
+        var fragments: [TextLayoutFragment] = []
+        fragments.reserveCapacity(text.count)
+        var characterIndex = 0
+        var utf16Offset: Int32 = 0
+        var lowerBound = text.startIndex
+
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            let nextOffset = utf16Offset + Int32(text[range].utf16.count)
+            guard
+                let startRect = try? measurementBox.getRectFromCharacterIndex(
+                    utf16Offset,
+                    false
+                ),
+                let endRect = try? measurementBox.getRectFromCharacterIndex(
+                    max(utf16Offset, nextOffset - 1),
+                    true
+                )
+            else {
+                return nil
+            }
+
+            let width = max(1, Int(abs(endRect.x - startRect.x).rounded(.awayFromZero)))
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(
+                        Int(startRect.x.rounded(.down)),
+                        Int(startRect.y.rounded(.down))
+                    ),
+                    size: SIMD2(
+                        width,
+                        max(1, Int(startRect.height.rounded(.awayFromZero)))
+                    ),
+                    baseline: 0
+                )
+            )
+
+            characterIndex += 1
+            utf16Offset = nextOffset
+            lowerBound = upperBound
+        }
+
+        return fragments
+    }
+
     private static func measure(
         _ textBlock: TextBlock,
         proposedWidth: Int?,
