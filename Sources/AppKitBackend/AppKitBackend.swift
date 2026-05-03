@@ -576,9 +576,26 @@ public final class AppKitBackend: FullAppBackend {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         widget.layer?.sublayerTransform = CATransform3DMakeAffineTransform(
-            CGAffineTransform(transform)
+            CGAffineTransform(
+                transform,
+                yDownHeight: Self.transformCoordinateHeight(of: widget)
+            )
         )
         CATransaction.commit()
+    }
+
+    private static func transformCoordinateHeight(of widget: Widget) -> Double {
+        if widget.bounds.height > 0 {
+            return Double(widget.bounds.height)
+        }
+
+        for constraint in widget.constraints {
+            if constraint.firstAnchor === widget.heightAnchor, constraint.isActive {
+                return Double(constraint.constant)
+            }
+        }
+
+        return 0
     }
 
     public func setBlur(of widget: Widget, radius: Double) {
@@ -646,6 +663,117 @@ public final class AppKitBackend: FullAppBackend {
             Int(rect.size.width.rounded(.awayFromZero)),
             Int(height.rounded(.awayFromZero))
         )
+    }
+
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        let attributedString = Self.attributedString(for: text, in: environment)
+        let storage = NSTextStorage(attributedString: attributedString)
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(
+            size: NSSize(
+                width: proposedWidth.map(Double.init) ?? .greatestFiniteMagnitude,
+                height: proposedHeight.map(Double.init) ?? .greatestFiniteMagnitude
+            )
+        )
+        textContainer.lineFragmentPadding = 0
+        textContainer.lineBreakMode = proposedHeight == nil ? .byWordWrapping : .byTruncatingTail
+        textContainer.maximumNumberOfLines = environment.lineLimitSettings?.limit ?? 0
+
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+
+        var fragments: [TextLayoutFragment] = []
+        var characterIndex = 0
+        var lowerBound = text.startIndex
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            let characterRange = NSRange(range, in: text)
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: characterRange,
+                actualCharacterRange: nil
+            )
+
+            let rect: NSRect
+            if glyphRange.length > 0 {
+                let lineRect = layoutManager.lineFragmentRect(
+                    forGlyphAt: glyphRange.location,
+                    effectiveRange: nil
+                )
+                let glyphLocation = layoutManager.location(
+                    forGlyphAt: glyphRange.location
+                )
+                let inkRect = layoutManager.boundingRect(
+                    forGlyphRange: glyphRange,
+                    in: textContainer
+                )
+                let originX = lineRect.minX + glyphLocation.x
+                let nextGlyphIndex = NSMaxRange(glyphRange)
+                let endX: CGFloat
+                if nextGlyphIndex < layoutManager.numberOfGlyphs {
+                    let nextLineRect = layoutManager.lineFragmentRect(
+                        forGlyphAt: nextGlyphIndex,
+                        effectiveRange: nil
+                    )
+                    let nextGlyphLocation = layoutManager.location(
+                        forGlyphAt: nextGlyphIndex
+                    )
+                    let nextX = nextLineRect.minX + nextGlyphLocation.x
+                    endX = nextX >= originX ? nextX : inkRect.maxX
+                } else {
+                    endX = inkRect.maxX
+                }
+                let width = max(0, max(endX - originX, inkRect.width))
+                rect = NSRect(
+                    x: originX,
+                    y: lineRect.minY,
+                    width: width,
+                    height: lineRect.height
+                )
+            } else {
+                rect = .zero
+            }
+
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(
+                        Int(rect.minX.rounded(.down)),
+                        Int(rect.minY.rounded(.down))
+                    ),
+                    size: SIMD2(
+                        Int(rect.width.rounded(.awayFromZero)),
+                        Int(rect.height.rounded(.awayFromZero))
+                    ),
+                    baseline: glyphRange.length > 0
+                        ? Int(
+                            (
+                                layoutManager.lineFragmentRect(
+                                    forGlyphAt: glyphRange.location,
+                                    effectiveRange: nil
+                                ).minY
+                                    + layoutManager.location(forGlyphAt: glyphRange.location).y
+                            ).rounded(.down)
+                        )
+                        : 0
+                )
+            )
+            characterIndex += 1
+            lowerBound = upperBound
+        }
+        return fragments
     }
 
     public func createTextView() -> Widget {
@@ -1923,6 +2051,21 @@ private extension CGAffineTransform {
             d: transform.linearTransform.w,
             tx: transform.translation.x,
             ty: transform.translation.y
+        )
+    }
+
+    init(_ transform: SwiftCrossUI.AffineTransform, yDownHeight height: Double) {
+        let a = transform.linearTransform.x
+        let b = transform.linearTransform.y
+        let c = transform.linearTransform.z
+        let d = transform.linearTransform.w
+        self.init(
+            a: a,
+            b: -c,
+            c: -b,
+            d: d,
+            tx: transform.translation.x + b * height,
+            ty: height * (1 - d) - transform.translation.y
         )
     }
 }

@@ -1,5 +1,27 @@
 import Foundation
 
+public struct TextLayoutFragment: Hashable, Sendable {
+    public var characterIndex: Int
+    public var sourceRange: Range<String.Index>?
+    public var origin: SIMD2<Int>
+    public var size: SIMD2<Int>
+    public var baseline: Int
+
+    public init(
+        characterIndex: Int,
+        sourceRange: Range<String.Index>? = nil,
+        origin: SIMD2<Int>,
+        size: SIMD2<Int>,
+        baseline: Int = 0
+    ) {
+        self.characterIndex = characterIndex
+        self.sourceRange = sourceRange
+        self.origin = origin
+        self.size = size
+        self.baseline = baseline
+    }
+}
+
 /// A backend that can be used to run an app. Usually built on top of an
 /// existing UI framework.
 ///
@@ -722,6 +744,23 @@ public protocol AppBackend: Sendable {
         proposedHeight: Int?,
         environment: EnvironmentValues
     ) -> SIMD2<Int>
+
+    /// Returns native layout fragments for each grapheme cluster in `text`.
+    ///
+    /// Backends should derive these fragments from the full text layout, not by
+    /// measuring characters individually. The returned fragment positions must
+    /// match the backend's own rendered text, including whitespace, kerning,
+    /// line wrapping, truncation, and text-direction behavior. Returning `nil`
+    /// means that character-level content transitions fall back to whole-view
+    /// transitions; returning approximate fragments is worse than returning
+    /// `nil`.
+    func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]?
 
     /// Creates a non-editable text view with optional text wrapping.
     ///
@@ -1543,6 +1582,16 @@ extension AppBackend {
 
     public nonisolated var preferredFramesPerSecond: Double {
         60
+    }
+
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        nil
     }
 }
 

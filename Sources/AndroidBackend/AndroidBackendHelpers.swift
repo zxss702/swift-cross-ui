@@ -20,4 +20,11 @@ class AndroidBackendHelpers: JavaObject {
 
     @JavaMethod
     func runOnMainThread(_ action: SwiftAction?)
+
+    @JavaMethod
+    func textLayoutFragmentMetrics(
+        _ textView: AndroidKit.TextView?,
+        _ text: String,
+        _ proposedWidth: Int32
+    ) -> [Int32]
 }
