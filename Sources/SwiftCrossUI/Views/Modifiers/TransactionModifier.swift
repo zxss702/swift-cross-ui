@@ -71,7 +71,7 @@ struct AnimationValueModifierView<Content: View, Value: Equatable>: TypeSafeView
             environment,
             previousValue: children.previousValue
         )
-        children.previousValue = value
+        children.pendingValue = value
         let childResult = children.child.computeLayout(
             with: body.view0,
             proposedSize: proposedSize,
@@ -88,6 +88,7 @@ struct AnimationValueModifierView<Content: View, Value: Equatable>: TypeSafeView
         backend: Backend
     ) {
         _ = children.child.commit()
+        children.previousValue = children.pendingValue
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
     }
@@ -107,9 +108,16 @@ struct AnimationValueModifierView<Content: View, Value: Equatable>: TypeSafeView
     }
 }
 
+extension AnimationValueModifierView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(Self.self, child: body.view0)
+    }
+}
+
 class AnimationValueModifierChildren<Content: View, Value: Equatable>: ViewGraphNodeChildren {
     var child: AnyViewGraphNode<Content>
     var previousValue: Value?
+    var pendingValue: Value
 
     var widgets: [AnyWidget] {
         [child.widget]
@@ -127,6 +135,7 @@ class AnimationValueModifierChildren<Content: View, Value: Equatable>: ViewGraph
         environment: EnvironmentValues
     ) {
         previousValue = value
+        pendingValue = value
         child = AnyViewGraphNode(
             for: content,
             backend: backend,

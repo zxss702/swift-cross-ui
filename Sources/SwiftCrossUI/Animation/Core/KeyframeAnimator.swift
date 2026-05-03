@@ -4,7 +4,7 @@ import Foundation
 /// A view that renders content using values produced by keyframes.
 public struct KeyframeAnimator<Value, KeyframePath: Keyframes, Content: View>: TypeSafeView
 where KeyframePath.Value == Value {
-    typealias Children = KeyframeAnimatorChildren
+    typealias Children = KeyframeAnimatorChildren<Value>
 
     public var body = EmptyView()
     private var initialValue: Value
@@ -43,11 +43,12 @@ where KeyframePath.Value == Value {
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
-    ) -> KeyframeAnimatorChildren {
+    ) -> KeyframeAnimatorChildren<Value> {
         KeyframeAnimatorChildren(
             content: AnyView(content(initialValue)),
             trigger: trigger,
             shouldRun: trigger == nil,
+            initialValue: initialValue,
             backend: backend,
             snapshot: snapshots?.first,
             environment: environment
@@ -55,7 +56,7 @@ where KeyframePath.Value == Value {
     }
 
     func asWidget<Backend: AppBackend>(
-        _ children: KeyframeAnimatorChildren,
+        _ children: KeyframeAnimatorChildren<Value>,
         backend: Backend
     ) -> Backend.Widget {
         let container = backend.createContainer()
@@ -65,13 +66,13 @@ where KeyframePath.Value == Value {
 
     func computeLayout<Backend: AppBackend>(
         _ widget: Backend.Widget,
-        children: KeyframeAnimatorChildren,
+        children: KeyframeAnimatorChildren<Value>,
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
         resetIfNeeded(children: children)
-        let timeline = makeTimeline()
+        let timeline = makeTimeline(initialValue: children.runInitialValue)
         children.duration = timeline.duration
         children.proposedSize = proposedSize
         let keyframeEnvironment = keyframeRenderEnvironment(environment)
@@ -85,7 +86,7 @@ where KeyframePath.Value == Value {
 
     func commit<Backend: AppBackend>(
         _ widget: Backend.Widget,
-        children: KeyframeAnimatorChildren,
+        children: KeyframeAnimatorChildren<Value>,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
         backend: Backend
@@ -101,7 +102,7 @@ where KeyframePath.Value == Value {
         scheduleNextFrameIfNeeded(children: children, environment: environment)
     }
 
-    private func makeTimeline() -> KeyframeTimeline<Value> {
+    private func makeTimeline(initialValue: Value) -> KeyframeTimeline<Value> {
         makeKeyframeTimeline(
             from: keyframes(initialValue),
             initialValue: initialValue
@@ -110,16 +111,18 @@ where KeyframePath.Value == Value {
 
     private func sampledValue(
         from timeline: KeyframeTimeline<Value>,
-        children: KeyframeAnimatorChildren
+        children: KeyframeAnimatorChildren<Value>
     ) -> Value {
         let duration = timeline.duration
         guard duration > 0 else {
             return timeline.value(time: 0)
         }
-        return timeline.value(time: min(max(children.elapsedTime, 0), duration))
+        let value = timeline.value(time: min(max(children.elapsedTime, 0), duration))
+        children.currentValue = value
+        return value
     }
 
-    private func resetIfNeeded(children: KeyframeAnimatorChildren) {
+    private func resetIfNeeded(children: KeyframeAnimatorChildren<Value>) {
         guard children.trigger != trigger else {
             return
         }
@@ -128,11 +131,12 @@ where KeyframePath.Value == Value {
         children.scheduledGeneration = nil
         children.startTime = nil
         children.shouldRun = true
+        children.runInitialValue = children.currentValue
         children.elapsedTime = 0
     }
 
     private func scheduleNextFrameIfNeeded(
-        children: KeyframeAnimatorChildren,
+        children: KeyframeAnimatorChildren<Value>,
         environment: EnvironmentValues
     ) {
         guard children.shouldRun, children.scheduledGeneration == nil else {
@@ -149,7 +153,7 @@ where KeyframePath.Value == Value {
         )
     }
 
-    private func finishInstantAnimation(children: KeyframeAnimatorChildren) {
+    private func finishInstantAnimation(children: KeyframeAnimatorChildren<Value>) {
         children.shouldRun = false
     }
 
@@ -162,7 +166,7 @@ where KeyframePath.Value == Value {
     }
 
     private func updatedRenderLayoutIfNeeded(
-        children: KeyframeAnimatorChildren,
+        children: KeyframeAnimatorChildren<Value>,
         layout: ViewLayoutResult,
         environment: EnvironmentValues
     ) -> ViewLayoutResult {
@@ -174,7 +178,7 @@ where KeyframePath.Value == Value {
             children.scheduledGeneration = nil
         }
 
-        let timeline = makeTimeline()
+        let timeline = makeTimeline(initialValue: children.runInitialValue)
         children.duration = timeline.duration
         updateElapsedTime(
             children: children,
@@ -198,7 +202,7 @@ where KeyframePath.Value == Value {
     }
 
     private func updateElapsedTime(
-        children: KeyframeAnimatorChildren,
+        children: KeyframeAnimatorChildren<Value>,
         duration: TimeInterval,
         startsIfNeeded: Bool
     ) {
@@ -231,10 +235,12 @@ where KeyframePath.Value == Value {
     }
 }
 
-class KeyframeAnimatorChildren: ViewGraphNodeChildren {
+class KeyframeAnimatorChildren<Value>: ViewGraphNodeChildren {
     var node: ErasedViewGraphNode
     var trigger: AnyEquatableValue?
     var shouldRun: Bool
+    var runInitialValue: Value
+    var currentValue: Value
     var duration: TimeInterval = 0
     var elapsedTime: TimeInterval = 0
     var generation = 0
@@ -254,12 +260,15 @@ class KeyframeAnimatorChildren: ViewGraphNodeChildren {
         content: AnyView,
         trigger: AnyEquatableValue?,
         shouldRun: Bool,
+        initialValue: Value,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,
         environment: EnvironmentValues
     ) {
         self.trigger = trigger
         self.shouldRun = shouldRun
+        self.runInitialValue = initialValue
+        self.currentValue = initialValue
         node = ErasedViewGraphNode(
             for: content,
             backend: backend,
