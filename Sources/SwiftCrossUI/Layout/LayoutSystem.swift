@@ -55,12 +55,19 @@ public enum LayoutSystem {
     }
 
     public struct LayoutableChild {
+        struct LayoutState: Equatable {
+            var identity: ObjectIdentifier
+            var generation: Int
+        }
+
         private var computeLayout:
             @MainActor (
                 _ proposedSize: ProposedViewSize,
                 _ environment: EnvironmentValues
             ) -> ViewLayoutResult
         private var _commit: @MainActor () -> ViewLayoutResult
+        private var _prepareForLayout: @MainActor () -> Void
+        private var _layoutState: @MainActor () -> LayoutState?
         var animationID: ObjectIdentifier?
         var tag: String?
 
@@ -72,8 +79,30 @@ public enum LayoutSystem {
             animationID: ObjectIdentifier? = nil,
             tag: String? = nil
         ) {
+            self.init(
+                computeLayout: computeLayout,
+                commit: commit,
+                prepareForLayout: {},
+                layoutState: { nil },
+                animationID: animationID,
+                tag: tag
+            )
+        }
+
+        init(
+            computeLayout:
+                @escaping @MainActor (ProposedViewSize, EnvironmentValues) ->
+                ViewLayoutResult,
+            commit: @escaping @MainActor () -> ViewLayoutResult,
+            prepareForLayout: @escaping @MainActor () -> Void,
+            layoutState: @escaping @MainActor () -> LayoutState?,
+            animationID: ObjectIdentifier? = nil,
+            tag: String? = nil
+        ) {
             self.computeLayout = computeLayout
             self._commit = commit
+            self._prepareForLayout = prepareForLayout
+            self._layoutState = layoutState
             self.animationID = animationID
             self.tag = tag
         }
@@ -93,6 +122,15 @@ public enum LayoutSystem {
                 },
                 commit: {
                     node.commit()
+                },
+                prepareForLayout: {
+                    node.prepareLayoutWithNewView(child())
+                },
+                layoutState: {
+                    LayoutState(
+                        identity: node.layoutIdentity(),
+                        generation: node.layoutGeneration()
+                    )
                 },
                 animationID: ObjectIdentifier(node.widget.widget as AnyObject)
             )
@@ -114,8 +152,27 @@ public enum LayoutSystem {
                 commit: {
                     node.commit()
                 },
+                prepareForLayout: {
+                    _ = node.prepareLayoutWithNewView(child())
+                },
+                layoutState: {
+                    LayoutState(
+                        identity: node.layoutIdentity(),
+                        generation: node.layoutGeneration()
+                    )
+                },
                 animationID: ObjectIdentifier(node.getWidget().widget as AnyObject)
             )
+        }
+
+        @MainActor
+        func prepareForLayout() {
+            _prepareForLayout()
+        }
+
+        @MainActor
+        func layoutState() -> LayoutState? {
+            _layoutState()
         }
 
         @MainActor
@@ -198,7 +255,8 @@ public enum LayoutSystem {
                     shouldRedistributeSpaceOnCommit(
                         proposedSize: proposedSize,
                         orientation: orientation
-                    )
+                    ),
+                signature: nil
             )
 
             return ViewLayoutResult(
@@ -214,11 +272,23 @@ public enum LayoutSystem {
             fatalError("unreachable")
         }
 
-        cache = recomputeCache(
+        for child in children {
+            child.prepareForLayout()
+        }
+
+        let signature = stackCacheSignature(
             children: children,
             proposedSize: proposedSize,
             environment: environment
         )
+        if signature == nil || cache.signature != signature || cache.priorityGroups.isEmpty {
+            cache = recomputeCache(
+                children: children,
+                proposedSize: proposedSize,
+                environment: environment,
+                signature: signature
+            )
+        }
 
         let renderedChildren = computeLayouts(
             of: children,
@@ -259,6 +329,26 @@ public enum LayoutSystem {
         proposedSize[component: orientation.perpendicular] == nil
     }
 
+    @MainActor
+    private static func stackCacheSignature(
+        children: [LayoutableChild],
+        proposedSize: ProposedViewSize,
+        environment: EnvironmentValues
+    ) -> StackLayoutCache.Signature? {
+        let childStates = children.map { $0.layoutState() }
+        guard childStates.allSatisfy({ $0 != nil }) else {
+            return nil
+        }
+        return StackLayoutCache.Signature(
+            orientation: environment.layoutOrientation,
+            spacing: environment.layoutSpacing,
+            proposedPerpendicular:
+                proposedSize[component: environment.layoutOrientation.perpendicular],
+            environment: environment.layoutInputFingerprint,
+            children: childStates.map { $0! }
+        )
+    }
+
     /// Computes the cache from scratch for the slow path (this is our last
     /// resort if shortcuts can't be made), preparing it for subsequent layout
     /// operations.
@@ -266,7 +356,8 @@ public enum LayoutSystem {
     static func recomputeCache(
         children: [LayoutableChild],
         proposedSize: ProposedViewSize,
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        signature: StackLayoutCache.Signature?
     ) -> StackLayoutCache {
         let orientation = environment.layoutOrientation
         let spacing = environment.layoutSpacing
@@ -349,7 +440,8 @@ public enum LayoutSystem {
             redistributeSpaceOnCommit: shouldRedistributeSpaceOnCommit(
                 proposedSize: proposedSize,
                 orientation: orientation
-            )
+            ),
+            signature: signature
         )
     }
 

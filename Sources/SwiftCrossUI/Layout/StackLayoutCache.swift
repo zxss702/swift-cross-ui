@@ -2,6 +2,14 @@
 /// values getting out of sync with each other (especially when new
 /// properties get introduced).
 struct StackLayoutCache {
+    struct Signature: Equatable {
+        var orientation: Orientation
+        var spacing: Int
+        var proposedPerpendicular: Double?
+        var environment: AnyHashable
+        var children: [LayoutSystem.LayoutableChild.LayoutState]
+    }
+
     /// The stack's children grouped by priority. May sometimes have all children
     /// in a single group due to the stack layout system determining that
     /// flexibility/priority will not have an effect on the final layout.
@@ -19,14 +27,17 @@ struct StackLayoutCache {
     /// Whether to redistribute space on commit or not. `true` if and only if the
     /// stack was provided a proposed size with an unspecified perpendicular axis.
     let redistributeSpaceOnCommit: Bool
+    var signature: Signature?
 
     /// The initial value of the cache (just a dummy value, shouldn't ever be used).
+    @MainActor
     static let initial = StackLayoutCache(
         priorityGroups: [],
         isHidden: [],
         totalSpacing: 0,
         totalReservedSpace: 0,
         minimumLengths: [],
-        redistributeSpaceOnCommit: false
+        redistributeSpaceOnCommit: false,
+        signature: nil
     )
 }

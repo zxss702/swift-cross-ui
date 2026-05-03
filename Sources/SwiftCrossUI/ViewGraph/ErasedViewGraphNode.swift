@@ -16,6 +16,9 @@ public struct ErasedViewGraphNode {
         ) -> (viewTypeMatched: Bool, size: ViewLayoutResult)
     /// The underlying view graph node's commit method.
     public var commit: () -> ViewLayoutResult
+    public var prepareLayoutWithNewView: (Any?) -> Void
+    public var layoutIdentity: () -> ObjectIdentifier
+    public var layoutGeneration: () -> Int
 
     public var getWidget: () -> AnyWidget
     public var viewType: any View.Type
@@ -64,6 +67,15 @@ public struct ErasedViewGraphNode {
             }
         }
         commit = node.commit
+        prepareLayoutWithNewView = { view in
+            node.prepareForLayout(with: view as? V)
+        }
+        layoutIdentity = {
+            node.layoutIdentity
+        }
+        layoutGeneration = {
+            node.layoutGeneration
+        }
         getWidget = {
             return AnyWidget(node.widget)
         }

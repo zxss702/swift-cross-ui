@@ -75,7 +75,7 @@ public class ViewGraph<Root: View> {
         latestProposal = proposedSize
 
         let result = rootNode.computeLayout(
-            with: newView ?? view,
+            with: newView,
             proposedSize: proposedSize,
             environment: parentEnvironment
         )

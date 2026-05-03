@@ -26,6 +26,9 @@ public class AnyViewGraphNode<NodeView: View> {
         ) -> ViewLayoutResult
     /// The node's type-erased commit method.
     private var _commit: () -> ViewLayoutResult
+    private var _prepareLayoutWithNewView: (NodeView?) -> Void
+    private var _layoutIdentity: () -> ObjectIdentifier
+    private var _layoutGeneration: () -> Int
     /// The type-erased getter for the node's widget.
     private var _getWidget: () -> AnyWidget
     /// The type-erased getter for the node's view.
@@ -42,6 +45,9 @@ public class AnyViewGraphNode<NodeView: View> {
         self.node = node
         _computeLayoutWithNewView = node.computeLayout(with:proposedSize:environment:)
         _commit = node.commit
+        _prepareLayoutWithNewView = node.prepareForLayout(with:)
+        _layoutIdentity = { node.layoutIdentity }
+        _layoutGeneration = { node.layoutGeneration }
         _getWidget = {
             AnyWidget(node.widget)
         }
@@ -96,6 +102,18 @@ public class AnyViewGraphNode<NodeView: View> {
     /// view's children. Also commits any view state changes.
     public func commit() -> ViewLayoutResult {
         _commit()
+    }
+
+    func prepareLayoutWithNewView(_ newView: NodeView?) {
+        _prepareLayoutWithNewView(newView)
+    }
+
+    func layoutIdentity() -> ObjectIdentifier {
+        _layoutIdentity()
+    }
+
+    func layoutGeneration() -> Int {
+        _layoutGeneration()
     }
 
     /// Gets the node's wrapped view.

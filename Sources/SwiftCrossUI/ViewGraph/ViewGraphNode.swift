@@ -9,6 +9,12 @@ import PerceptionCore
 /// even when a view gets recomputed by its parent.
 @MainActor
 public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserver, Sendable {
+    private struct CurrentLayoutCacheKey: Equatable {
+        var proposedSize: ProposedViewSize
+        var environment: AnyHashable
+        var layoutGeneration: Int
+    }
+
     /// The view's single widget for the entirety of its lifetime in the view graph.
     ///
     public var widget: Backend.Widget {
@@ -45,6 +51,9 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
     /// A cache of update results keyed by the proposed size they were for. Gets
     /// cleared before the results' sizes become invalid.
     var resultCache: [ProposedViewSize: ViewLayoutResult]
+    private var currentLayoutCacheKey: CurrentLayoutCacheKey?
+    private(set) var layoutGeneration = 0
+    private var layoutInputKey: AnyHashable?
     /// The most recent size proposed by the parent view. Used when updating the wrapped
     /// view as a result of a state change rather than the parent view updating. Proposals
     /// that get cached responses don't update this size, as this size should stay in sync
@@ -85,6 +94,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
             ? snapshot?.children : snapshot.map { [$0] }
 
         currentLayout = nil
+        currentLayoutCacheKey = nil
         resultCache = [:]
         lastProposedSize = .zero
         parentEnvironment = environment
@@ -96,6 +106,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
         let viewEnvironment = updateEnvironment(environment)
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: nil)
+        layoutInputKey = Self.layoutInputKey(for: view)
 
         self.children = GraphUpdateContext.withUpdating {
             self.observe(in: backend) {
@@ -141,6 +152,10 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
                 }
             )
         }
+    }
+
+    var layoutIdentity: ObjectIdentifier {
+        ObjectIdentifier(self)
     }
     
     func viewModelDidChange<B: AppBackend>(backend: B) {
@@ -248,6 +263,34 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
         parentEnvironment = parentEnvironment.withoutCurrentTransaction()
     }
 
+    func prepareForLayout(with newView: NodeView?) {
+        guard let newView else {
+            return
+        }
+
+        let newKey = Self.layoutInputKey(for: newView)
+        if let newKey {
+            guard newKey != layoutInputKey else {
+                return
+            }
+            layoutInputKey = newKey
+            invalidateLayoutCache()
+        } else if layoutInputKey != nil {
+            layoutInputKey = nil
+            invalidateLayoutCache()
+        }
+    }
+
+    private func invalidateLayoutCache() {
+        resultCache = [:]
+        currentLayoutCacheKey = nil
+        layoutGeneration &+= 1
+    }
+
+    private static func layoutInputKey(for view: NodeView) -> AnyHashable? {
+        LayoutInputKeys.key(for: view)
+    }
+
     /// Recomputes the view's body and computes its layout and the layout of
     /// its children.
     ///
@@ -282,7 +325,32 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
             hasHadFirstUpdate = true
         }
 
-        if proposedSize == lastProposedSize && !resultCache.isEmpty
+        let previousView: NodeView?
+        if let newView {
+            previousView = view
+            view = newView
+        } else {
+            previousView = nil
+        }
+
+        let viewEnvironment = updateEnvironment(environment)
+        dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
+        prepareForLayout(with: newView)
+        let currentCacheKey = CurrentLayoutCacheKey(
+            proposedSize: proposedSize,
+            environment: environment.layoutInputFingerprint,
+            layoutGeneration: layoutGeneration
+        )
+
+        if !environment.allowLayoutCaching,
+            canReuseCommittedCurrentLayout,
+            currentLayoutCacheKey == currentCacheKey,
+            let currentLayout
+        {
+            parentEnvironment = environment
+            lastProposedSize = proposedSize
+            return currentLayout
+        } else if proposedSize == lastProposedSize && !resultCache.isEmpty
             && (!parentEnvironment.allowLayoutCaching || environment.allowLayoutCaching),
             let currentLayout
         {
@@ -303,18 +371,6 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
         parentEnvironment = environment
         lastProposedSize = proposedSize
 
-        let previousView: NodeView?
-        if let newView {
-            previousView = view
-            view = newView
-        } else {
-            previousView = nil
-        }
-
-        let viewEnvironment = updateEnvironment(environment)
-
-        dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
-
         // We assume that the view's sizing behaviour won't change between consecutive
         // layout computations and the following commit, because groups of updates
         // following that pattern are assumed to be occurring within a single overarching
@@ -331,7 +387,12 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
         resultCache[proposedSize] = result
 
         currentLayout = result
+        currentLayoutCacheKey = environment.allowLayoutCaching ? nil : currentCacheKey
         return result
+    }
+
+    private var canReuseCommittedCurrentLayout: Bool {
+        layoutInputKey != nil && view is any ElementaryView
     }
 
     /// Commits the view's most recently computed layout and any view state changes
