@@ -20,6 +20,15 @@ private func layoutableChild<V: View>(
         commit: {
             node.commit()
         },
+        prepareForLayout: {
+            node.prepareLayoutWithNewView(view)
+        },
+        layoutState: {
+            LayoutSystem.LayoutableChild.LayoutState(
+                identity: node.layoutIdentity(),
+                generation: node.layoutGeneration()
+            )
+        },
         tag: "\(type(of: view))"
     )
 }
@@ -136,5 +145,22 @@ extension ${view}: TupleView {
             layoutableChild(node: children.child${j}, view: view${j}),
             % end
         ]
+    }
+}
+
+extension ${view}: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        let childKeys = [
+            % for j in range(i + 1):
+            LayoutInputKeys.key(for: view${j}),
+            % end
+        ]
+        guard childKeys.allSatisfy({ $0 != nil }) else {
+            return nil
+        }
+        return LayoutInputKeys.make(
+            Self.self,
+            values: childKeys.map { $0! }
+        )
     }
 }
