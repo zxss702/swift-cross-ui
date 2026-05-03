@@ -95,6 +95,7 @@ struct AnimationShowcaseView: View {
 
     private func runPrimaryAnimation() {
         withAnimation(activeAnimation) {
+            bindingToggle.toggle()
             expanded.toggle()
             alternate.toggle()
             sliderValue = sliderValue < 0.5 ? 0.9 : 0.2
