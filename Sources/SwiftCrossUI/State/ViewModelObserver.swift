@@ -1,8 +1,30 @@
 import Foundation
+import Mutex
 import PerceptionCore
 #if canImport(Observation)
     import Observation
 #endif
+
+final class ObservationTrackingState: @unchecked Sendable {
+    private let generation = Mutex(0)
+
+    func beginTracking() -> Int {
+        generation.withLock { generation in
+            generation &+= 1
+            return generation
+        }
+    }
+
+    func invalidate(_ observedGeneration: Int) -> Bool {
+        generation.withLock { generation in
+            guard generation == observedGeneration else {
+                return false
+            }
+            generation &+= 1
+            return true
+        }
+    }
+}
 
 /// This protocol can be adopted by classes responsible for handling part of
 /// the view hierarchy. It makes it easy to automatically update the view when
@@ -23,7 +45,7 @@ import PerceptionCore
 @MainActor
 protocol ViewModelObserver: AnyObject, Sendable {
     /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
-    var currentViewModelObservationID: UUID? { get set }
+    var observationTrackingState: ObservationTrackingState { get }
 
     /// This method is called at most once after a call to `observe()` if an object conforming to
     /// `Observable` or `Perceptible` used in the `computation` closure of the last call to
@@ -77,8 +99,9 @@ extension ViewModelObserver {
             return computation()
         }
 
-        let perceptionTrackingID = UUID()
-        self.currentViewModelObservationID = perceptionTrackingID
+        let trackingState = observationTrackingState
+        let trackingGeneration = trackingState.beginTracking()
+
         #if canImport(Observation)
         if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0, *) {
             return withObservationTracking(
@@ -87,11 +110,14 @@ extension ViewModelObserver {
                         computation()
                     }
                 },
-                onChange: { [backend, weak self] in
+                onChange: {
                     let transaction = StateMutationContext.currentTransaction
                         .overlaid(by: TransactionContext.current)
-                    backend.runInMainThread {
-                        guard let self, self.currentViewModelObservationID == perceptionTrackingID else { return }
+                    guard trackingState.invalidate(trackingGeneration) else {
+                        return
+                    }
+                    backend.runInMainThread { [weak self] in
+                        guard let self else { return }
                         self.enqueueObservedChange(
                             backend: backend,
                             transaction: transaction
@@ -108,11 +134,12 @@ extension ViewModelObserver {
         } onChange: { [backend, weak self] in
             let transaction = StateMutationContext.currentTransaction
                 .overlaid(by: TransactionContext.current)
-            backend.runInMainThread {
-                guard
-                    self?.currentViewModelObservationID == perceptionTrackingID
-                else { return }
-                self?.enqueueObservedChange(
+            guard trackingState.invalidate(trackingGeneration) else {
+                return
+            }
+            backend.runInMainThread { [weak self] in
+                guard let self else { return }
+                self.enqueueObservedChange(
                     backend: backend,
                     transaction: transaction
                 )

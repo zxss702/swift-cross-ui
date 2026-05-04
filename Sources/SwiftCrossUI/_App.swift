@@ -22,8 +22,8 @@ class _App<AppRoot: App>: ViewModelObserver {
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
 
-    /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
-    var currentViewModelObservationID: UUID?
+    /// Tracks Observation dependencies accessed while computing `App.body`.
+    let observationTrackingState = ObservationTrackingState()
 
     /// Wraps a user's app implementation.
     init(_ app: AppRoot) {

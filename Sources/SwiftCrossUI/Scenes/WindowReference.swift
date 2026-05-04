@@ -19,8 +19,8 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
     /// The window's preferred color scheme, cached from the last update.
     private var preferredColorScheme: ColorScheme?
 
-    /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
-    var currentViewModelObservationID: UUID?
+    /// Tracks Observation dependencies accessed while computing scene content.
+    let observationTrackingState = ObservationTrackingState()
 
     /// - Parameters:
     ///   - closeHandler: The action to perform when the window is closed. Should

@@ -71,8 +71,9 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ViewModelOb
     /// The dynamic property updater for this view.
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
 
-    /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
-    var currentViewModelObservationID: UUID?
+    /// Tracks Observation dependencies accessed while computing this node's body.
+    let observationTrackingState = ObservationTrackingState()
+    private var needsObservationRefresh = false
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -173,6 +174,7 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ViewModelOb
 
     private func enqueueBottomUpUpdate(transaction: Transaction) {
         let updateKey = AnyHashable(ObjectIdentifier(self))
+        needsObservationRefresh = true
 
         guard let graphUpdateHost = parentEnvironment.graphUpdateHost else {
             backend.runInMainThread { [weak self] in
@@ -263,6 +265,16 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ViewModelOb
         parentEnvironment = parentEnvironment.withoutCurrentTransaction()
     }
 
+    private func refreshViewObservation() {
+        guard NodeView.Content.self != Never.self else {
+            return
+        }
+
+        _ = observe(in: backend) {
+            view.body
+        }
+    }
+
     func prepareForLayout(with newView: NodeView?) {
         guard let newView else {
             return
@@ -334,7 +346,12 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ViewModelOb
         }
 
         let viewEnvironment = updateEnvironment(environment)
+        let shouldRefreshObservation = newView != nil || needsObservationRefresh
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
+        if shouldRefreshObservation {
+            refreshViewObservation()
+            needsObservationRefresh = false
+        }
         prepareForLayout(with: newView)
         let currentCacheKey = CurrentLayoutCacheKey(
             proposedSize: proposedSize,
