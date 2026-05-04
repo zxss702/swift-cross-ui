@@ -113,12 +113,44 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
             return
         }
         children.scheduledGeneration = children.generation
-        scheduleNextPhase(
-            children: children,
-            generation: children.generation,
-            environment: environment,
-            backend: backend
-        )
+        if trigger == nil {
+            scheduleNextPhase(
+                children: children,
+                generation: children.generation,
+                environment: environment,
+                backend: backend
+            )
+        } else {
+            scheduleTriggeredPhases(
+                children: children,
+                generation: children.generation,
+                environment: environment,
+                backend: backend
+            )
+        }
+    }
+
+    private func scheduleTriggeredPhases<Backend: BaseAppBackend>(
+        children: PhaseAnimatorChildren,
+        generation: Int,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        var delay = 0.0
+        for index in (currentPhaseIndex + 1)..<phases.count {
+            let phase = phases[index]
+            delay += animation(phase)?.estimatedDuration ?? 0.35
+            let transaction = Transaction(animation: animation(phase))
+            schedulePhase(
+                index,
+                delay: delay,
+                transaction: transaction,
+                children: children,
+                generation: generation,
+                environment: environment,
+                backend: backend
+            )
+        }
     }
 
     private func scheduleNextPhase<Backend: BaseAppBackend>(
@@ -160,6 +192,40 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
             if trigger == nil || nextIndex < phases.count - 1 {
                 children.scheduledGeneration = nil
             }
+        }
+    }
+
+    private func schedulePhase<Backend: BaseAppBackend>(
+        _ index: Int,
+        delay: Double,
+        transaction: Transaction,
+        children: PhaseAnimatorChildren,
+        generation: Int,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        guard let graphUpdateHost = environment.graphUpdateHost else {
+            backend.runInMainThread {
+                guard children.generation == generation else {
+                    return
+                }
+                withTransaction(transaction) {
+                    currentPhaseIndex = index
+                }
+            }
+            return
+        }
+
+        graphUpdateHost.enqueueAfter(
+            backend: backend,
+            delay: delay,
+            transaction: transaction,
+            key: AnyHashable(ObjectIdentifier(children))
+        ) {
+            guard children.generation == generation else {
+                return
+            }
+            currentPhaseIndex = index
         }
     }
 }

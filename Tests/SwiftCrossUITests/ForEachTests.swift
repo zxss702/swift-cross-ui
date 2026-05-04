@@ -3,6 +3,15 @@ import Testing
 import DummyBackend
 @testable import SwiftCrossUI
 
+@MainActor
+private func transitioningTextForEach(
+    _ ids: [Int]
+) -> ForEach<[Int], Int, TupleView1<TransitionModifierView<Text>>> {
+    ForEach(ids, id: \.self) { x in
+        TransitionModifierView(content: Text("\(x)"), transition: .opacity)
+    }
+}
+
 @Suite("Testing for ForEach")
 struct ForEachTests: Sendable {
     @MainActor
@@ -60,7 +69,7 @@ struct ForEachTests: Sendable {
 
         // Initialize the state of each view to match its index
         let originalErasedNodes = node.children.erasedNodes
-        let originalNodes = originalErasedNodes.map(\.node)
+        let originalNodes = originalErasedNodes.map { $0.node }
         let originalWidgets = node.widget.getChildren()
 
         #expect(originalNodes.count == values.count)
@@ -78,7 +87,7 @@ struct ForEachTests: Sendable {
         _ = node.commit()
 
         let newErasedNodes = node.children.erasedNodes
-        let newNodes = newErasedNodes.map(\.node)
+        let newNodes = newErasedNodes.map { $0.node }
         let newWidgets = node.widget.getChildren()
 
         // Sanity check
@@ -152,15 +161,8 @@ struct ForEachTests: Sendable {
             .with(\.window, window)
             .with(\.transaction, transaction)
 
-        func makeView(_ ids: [Int]) -> some View {
-            ForEach(ids, id: \.self) { x in
-                Text("\(x)")
-                    .transition(.opacity)
-            }
-        }
-
         let node = ViewGraphNode(
-            for: makeView([1, 2, 3]),
+            for: transitioningTextForEach([1, 2, 3]),
             backend: backend,
             environment: environment
         )
@@ -168,7 +170,7 @@ struct ForEachTests: Sendable {
         _ = node.commit()
 
         _ = node.computeLayout(
-            with: makeView([1, 2, 3, 4]),
+            with: transitioningTextForEach([1, 2, 3, 4]),
             proposedSize: .unspecified,
             environment: environment
         )
@@ -186,31 +188,24 @@ struct ForEachTests: Sendable {
             .with(\.window, window)
             .with(\.transaction, Transaction(animation: .linear(duration: 1)))
 
-        func makeView(_ ids: [Int]) -> some View {
-            ForEach(ids, id: \.self) { x in
-                Text("\(x)")
-                    .transition(.opacity)
-            }
-        }
-
         let node = ViewGraphNode(
-            for: makeView([1, 2, 3]),
+            for: transitioningTextForEach([1, 2, 3]),
             backend: backend,
             environment: environment
         )
         _ = node.computeLayout(proposedSize: .unspecified, environment: environment)
         _ = node.commit()
 
-        let originalNodes = node.children.erasedNodes.map(\.node)
+        let originalNodes = node.children.erasedNodes.map { $0.node }
 
         _ = node.computeLayout(
-            with: makeView([1, 2]),
+            with: transitioningTextForEach([1, 2]),
             proposedSize: .unspecified,
             environment: environment
         )
         _ = node.commit()
 
-        let updatedNodes = node.children.erasedNodes.map(\.node)
+        let updatedNodes = node.children.erasedNodes.map { $0.node }
         #expect(updatedNodes.count == 3)
         #expect(updatedNodes.last === originalNodes.last)
     }
@@ -224,15 +219,8 @@ struct ForEachTests: Sendable {
             .with(\.window, window)
             .with(\.transaction, Transaction(animation: .linear(duration: 1)))
 
-        func makeView(_ ids: [Int]) -> some View {
-            ForEach(ids, id: \.self) { x in
-                Text("\(x)")
-                    .transition(.opacity)
-            }
-        }
-
         let node = ViewGraphNode(
-            for: makeView([1, 2, 3, 4, 5]),
+            for: transitioningTextForEach([1, 2, 3, 4, 5]),
             backend: backend,
             environment: environment
         )
@@ -240,14 +228,14 @@ struct ForEachTests: Sendable {
         _ = node.commit()
 
         _ = node.computeLayout(
-            with: makeView([1, 2, 3, 4]),
+            with: transitioningTextForEach([1, 2, 3, 4]),
             proposedSize: .unspecified,
             environment: environment
         )
         _ = node.commit()
 
         _ = node.computeLayout(
-            with: makeView([1, 2, 3]),
+            with: transitioningTextForEach([1, 2, 3]),
             proposedSize: .unspecified,
             environment: environment
         )
@@ -268,46 +256,32 @@ struct ForEachTests: Sendable {
             .with(\.window, window)
             .with(\.transaction, Transaction(animation: .linear(duration: 1)))
 
-        func makeView(_ ids: [Int]) -> some View {
-            ForEach(ids, id: \.self) { x in
-                Text("\(x)")
-                    .transition(.opacity)
-            }
-        }
-
         let node = ViewGraphNode(
-            for: makeView([1, 2, 3, 4]),
+            for: transitioningTextForEach([1, 2, 3, 4]),
             backend: backend,
             environment: environment
         )
         _ = node.computeLayout(proposedSize: .unspecified, environment: environment)
         _ = node.commit()
 
-        let originalActiveNodes = (node.children as! ForEachViewChildren<
-            [Int], Int, TupleView1<TransitionModifierView<Text>>
-        >).nodes.map(\.node)
+        let originalNodes = node.children.erasedNodes.map { $0.node }
 
         _ = node.computeLayout(
-            with: makeView([1, 3, 4]),
+            with: transitioningTextForEach([1, 3, 4]),
             proposedSize: .unspecified,
             environment: environment
         )
         _ = node.commit()
 
-        let children = node.children as! ForEachViewChildren<
-            [Int], Int, TupleView1<TransitionModifierView<Text>>
-        >
-        let activeNodes = children.nodes.map(\.node)
-        let renderedNodes = children.erasedNodes.map(\.node)
+        let renderedNodes = node.children.erasedNodes.map { $0.node }
         let widgets = node.widget.getChildren()
 
-        #expect(activeNodes.count == 3)
         #expect(renderedNodes.count == 4)
         #expect(widgets.count == 4)
-        #expect(activeNodes[0] === originalActiveNodes[0])
-        #expect(activeNodes[1] === originalActiveNodes[2])
-        #expect(activeNodes[2] === originalActiveNodes[3])
-        #expect(renderedNodes.last === originalActiveNodes[1])
+        #expect(ObjectIdentifier(renderedNodes[0]) == ObjectIdentifier(originalNodes[0]))
+        #expect(ObjectIdentifier(renderedNodes[1]) == ObjectIdentifier(originalNodes[2]))
+        #expect(ObjectIdentifier(renderedNodes[2]) == ObjectIdentifier(originalNodes[3]))
+        #expect(ObjectIdentifier(renderedNodes[3]) == ObjectIdentifier(originalNodes[1]))
     }
 
     @MainActor
@@ -318,8 +292,8 @@ struct ForEachTests: Sendable {
         let environment = EnvironmentValues(backend: backend)
             .with(\.window, window)
 
-        func makeView(_ id: Int) -> some View {
-            Text("value").id(id)
+        func makeView(_ id: Int) -> IDView<Text, Int> {
+            IDView(content: Text("value"), id: id)
         }
 
         let node = ViewGraphNode(
@@ -338,7 +312,7 @@ struct ForEachTests: Sendable {
             environment: environment
         )
         _ = node.commit()
-        #expect(node.children.erasedNodes[0].node === originalNode)
+        #expect(ObjectIdentifier(node.children.erasedNodes[0].node) == ObjectIdentifier(originalNode))
 
         _ = node.computeLayout(
             with: makeView(2),
@@ -346,7 +320,7 @@ struct ForEachTests: Sendable {
             environment: environment
         )
         _ = node.commit()
-        #expect(node.children.erasedNodes[0].node !== originalNode)
+        #expect(ObjectIdentifier(node.children.erasedNodes[0].node) != ObjectIdentifier(originalNode))
     }
 }
 

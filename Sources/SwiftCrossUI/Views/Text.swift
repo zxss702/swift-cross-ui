@@ -663,7 +663,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
             fragmentNodes[index].phaseUpdateScheduled = true
             let id = fragmentNodes[index].id
             let delay = max(fragmentNodes[index].delay, 0)
-            let update = {
+            let update: @MainActor @Sendable () -> Void = {
                 guard let index = self.fragmentNodes.firstIndex(where: { $0.id == id }) else {
                     return
                 }
@@ -703,7 +703,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
             fragmentNodes[index].cleanupScheduled = true
             let id = fragmentNodes[index].id
             let delay = max(transitionDuration + fragmentNodes[index].delay, 0.001)
-            let cleanup = {
+            let cleanup: @MainActor @Sendable () -> Void = {
                 self.fragmentNodes.removeAll { $0.id == id }
                 if !self.fragmentNodes.contains(where: { $0.role == .outgoing || !$0.advanced }) {
                     self.fragmentNodes = []

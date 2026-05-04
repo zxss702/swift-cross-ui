@@ -226,13 +226,21 @@ extension View {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        let vStack = VStack(content: body)
-        return vStack.commit(
-            widget,
-            children: children,
+        var cache = (children as? TupleViewChildren)?.stackLayoutCache ?? .initial
+        _ = LayoutSystem.commitStackLayout(
+            container: widget,
+            children: children.erasedNodes.map { node in
+                LayoutSystem.LayoutableChild(node, child: { nil })
+            },
+            cache: &cache,
             layout: layout,
-            environment: environment,
+            environment:
+                environment
+                .with(\.layoutOrientation, .vertical)
+                .with(\.layoutAlignment, HorizontalAlignment.center.asStackAlignment)
+                .with(\.layoutSpacing, VStack<Content>.defaultSpacing),
             backend: backend
         )
+        (children as? TupleViewChildren)?.stackLayoutCache = cache
     }
 }

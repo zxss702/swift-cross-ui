@@ -185,11 +185,6 @@ let package = Package(
             .upToNextMinor(from: "0.2.0")
         ),
         .package(
-            url: "https://github.com/apple/swift-log.git",
-            // swift-log bumped its swift-tools-version in 1.7.0
-            .upToNextMinor(from: "1.7.0")
-        ),
-        .package(
             url: "https://github.com/swhitty/swift-mutex",
             .upToNextMinor(from: "0.0.6")
         ),

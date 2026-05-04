@@ -191,8 +191,7 @@ extension ForEach: TypeSafeView, View where Child: View {
             guard !renderKeys.contains(key) else {
                 continue
             }
-            let oldIndex = oldRenderKeys.firstIndex(of: key) ?? renderKeys.count
-            renderKeys.insert(key, at: min(oldIndex, renderKeys.count))
+            renderKeys.append(key)
         }
 
         children.activeKeys = newActiveKeys

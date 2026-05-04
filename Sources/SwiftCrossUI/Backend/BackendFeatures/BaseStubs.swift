@@ -78,7 +78,7 @@ private struct BaseStubsTest: BackendFeatures.BaseStubs {
     @available(*, deprecated)
 #endif
 extension BackendFeatures.BaseStubs {
-    fileprivate func todo(function: String = #function) -> Never {
+    fileprivate nonisolated func todo(function: String = #function) -> Never {
         fatalError("\(Self.self): \(function) not implemented")
     }
 }
@@ -377,7 +377,7 @@ extension BackendFeatures.BaseStubs {
         todo()
     }
 
-    public func runInMainThread(action: @escaping @MainActor () -> Void) {
+    public nonisolated func runInMainThread(action: @escaping @MainActor () -> Void) {
         todo()
     }
 

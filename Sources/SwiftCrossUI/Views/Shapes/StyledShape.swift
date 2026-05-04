@@ -2,11 +2,11 @@
 /// stroke style.
 public protocol StyledShape: Shape {
     /// The shape's stroke color.
-    var strokeColor: Color? { get }
+    nonisolated var strokeColor: Color? { get }
     /// The shape's fill color.
-    var fillColor: Color? { get }
+    nonisolated var fillColor: Color? { get }
     /// The shape's stroke style.
-    var strokeStyle: StrokeStyle? { get }
+    nonisolated var strokeStyle: StrokeStyle? { get }
 }
 
 struct StyledShapeImpl<Base: Shape>: Sendable {
@@ -15,7 +15,6 @@ struct StyledShapeImpl<Base: Shape>: Sendable {
     var fillColor: Color?
     var strokeStyle: StrokeStyle?
 
-    @MainActor
     init(
         base: Base,
         strokeColor: Color? = nil,

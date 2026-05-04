@@ -11,6 +11,7 @@ final class PresentationAnimation<Value: VectorArithmetic>: @unchecked Sendable 
     private var transaction: Transaction?
     private var context = AnimationContext<Value>()
     private var startTime: DispatchTime?
+    private var hasScheduledFrame = false
 
     var hasValue: Bool {
         target != nil
@@ -24,6 +25,10 @@ final class PresentationAnimation<Value: VectorArithmetic>: @unchecked Sendable 
     ) -> Value {
         if environment.allowLayoutCaching {
             return target
+        }
+
+        if RenderFrameContext.isRendering {
+            hasScheduledFrame = false
         }
 
         let now = RenderFrameContext.currentTime
@@ -110,6 +115,7 @@ final class PresentationAnimation<Value: VectorArithmetic>: @unchecked Sendable 
         animation = nil
         startTime = nil
         transaction = nil
+        hasScheduledFrame = false
     }
 
     func reset(to target: Value) {
@@ -119,9 +125,10 @@ final class PresentationAnimation<Value: VectorArithmetic>: @unchecked Sendable 
     private func scheduleFrame(
         _ requestFrame: @escaping @MainActor (Transaction) -> Void
     ) {
-        guard animation != nil else {
+        guard animation != nil, !hasScheduledFrame else {
             return
         }
+        hasScheduledFrame = true
         requestFrame(transaction ?? Transaction())
     }
 }
