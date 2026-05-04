@@ -11,7 +11,7 @@ public struct ObservableObjectMacro: MemberAttributeMacro, ExtensionMacro {
         in context: some MacroExpansionContext
     ) throws -> [AttributeSyntax] {
         guard ClassDeclSyntax(declaration) != nil else {
-            throw MacroError("@Observable can only be applied to classes")
+            throw MacroError("@ObservableObject can only be applied to classes")
         }
 
         guard
@@ -35,7 +35,8 @@ public struct ObservableObjectMacro: MemberAttributeMacro, ExtensionMacro {
                     ].contains(attr.attribute?._syntax.trimmedDescription)
             }),
             !variable.hasMacroApplication("ObservationIgnored"),
-            !variable.hasMacroApplication("SwiftCrossUI.ObservationIgnored"),
+            !variable.hasMacroApplication("ObservableObjectIgnored"),
+            !variable.hasMacroApplication("SwiftCrossUI.ObservableObjectIgnored"),
             // Only include properties without accessors
             let binding = destructureSingle(variable.bindings),
             // Don't allow any accessors, because even when the property is
@@ -57,7 +58,7 @@ public struct ObservableObjectMacro: MemberAttributeMacro, ExtensionMacro {
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
         guard ClassDeclSyntax(declaration) != nil else {
-            throw MacroError("@Observable can only be applied to classes")
+            throw MacroError("@ObservableObject can only be applied to classes")
         }
 
         let extensionDecl = try ExtensionDeclSyntax(
@@ -70,7 +71,7 @@ public struct ObservableObjectMacro: MemberAttributeMacro, ExtensionMacro {
     }
 }
 
-struct ObservationIgnoredMacro: AccessorMacro {
+struct ObservableObjectIgnoredMacro: AccessorMacro {
     static func expansion(
         of node: SwiftSyntax.AttributeSyntax,
         providingAccessorsOf declaration: some SwiftSyntax.DeclSyntaxProtocol,

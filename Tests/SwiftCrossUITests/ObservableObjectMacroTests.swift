@@ -117,18 +117,18 @@ struct ObservableTests: Sendable {
         )
     }
     
-    @Test("ObservationIgnored is honored")
-    func testObservationIgnoredIsHonored() {
+    @Test("ObservableObjectIgnored is honored")
+    func testObservableObjectIgnoredIsHonored() {
         assertMacroExpansion(
             """
             @ObservableObject
             class ViewModel {
-                @ObservationIgnored var skipMe = false
+                @ObservableObjectIgnored var skipMe = false
             }
             """,
             expandedSource: """
             class ViewModel {
-                @ObservationIgnored var skipMe = false
+                @ObservableObjectIgnored var skipMe = false
             }
             
             extension ViewModel: SwiftCrossUI.ObservableObject {
@@ -165,18 +165,18 @@ struct ObservableTests: Sendable {
         )
     }
     
-    @Test("Namespaced ObservationIgnored blocks application")
-    func namespacedObservationIgnoredBlocksApplication() async throws {
+    @Test("Namespaced ObservableObjectIgnored blocks application")
+    func namespacedObservableObjectIgnoredBlocksApplication() async throws {
         assertMacroExpansion(
             """
             @ObservableObject
             class ViewModel {
-                @SwiftCrossUI.ObservationIgnored var skipMe = false
+                @SwiftCrossUI.ObservableObjectIgnored var skipMe = false
             }
             """,
             expandedSource: """
             class ViewModel {
-                @SwiftCrossUI.ObservationIgnored var skipMe = false
+                @SwiftCrossUI.ObservableObjectIgnored var skipMe = false
             }
             
             extension ViewModel: SwiftCrossUI.ObservableObject {

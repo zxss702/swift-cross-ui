@@ -5,7 +5,7 @@ import SwiftSyntaxMacros
 struct SwiftCrossUIMacrosPlugin: CompilerPlugin {
     let providingMacros: [any Macro.Type] = [
         ObservableObjectMacro.self,
-        ObservationIgnoredMacro.self,
+        ObservableObjectIgnoredMacro.self,
         HotReloadableAppMacro.self,
         HotReloadableExprMacro.self,
         EntryMacro.self,

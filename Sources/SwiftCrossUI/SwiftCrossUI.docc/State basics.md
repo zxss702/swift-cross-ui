@@ -19,7 +19,7 @@ For situations where you need data to trickle back up again, use ``Binding``
 - ``Binding``
 - ``ObservableObject``
 - ``ObservableObject()``
-- ``ObservationIgnored()``
+- ``ObservableObjectIgnored()``
 - ``Published``
 - ``Publisher``
 - ``Cancellable``
