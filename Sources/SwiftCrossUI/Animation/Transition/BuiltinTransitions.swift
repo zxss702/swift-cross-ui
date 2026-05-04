@@ -69,7 +69,7 @@ public struct SlideTransition: Transition {
     public init() {}
 
     public func body(content: Content, phase: TransitionPhase) -> some View {
-        content.offset(x: phase.isIdentity ? 0 : 100, y: 0)
+        content.offset(x: phase.value * 100, y: 0)
     }
 }
 
@@ -84,7 +84,9 @@ public struct PushTransition: Transition {
     }
 
     public func body(content: Content, phase: TransitionPhase) -> some View {
-        let offset = phase.isIdentity ? ViewSize.zero : edge.transitionOffset
+        let offset = phase.isIdentity
+            ? ViewSize.zero
+            : edge.transitionOffset.scaled(by: -phase.value)
         content.offset(offset)
     }
 }
@@ -174,5 +176,11 @@ extension Edge {
             case .trailing:
                 ViewSize(100, 0)
         }
+    }
+}
+
+private extension ViewSize {
+    func scaled(by factor: Double) -> ViewSize {
+        ViewSize(width * factor, height * factor)
     }
 }

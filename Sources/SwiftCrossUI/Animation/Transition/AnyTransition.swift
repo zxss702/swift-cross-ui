@@ -6,6 +6,7 @@ public struct AnyTransition: @unchecked Sendable {
     public static let opacity = AnyTransition(OpacityTransition())
     public static let scale = AnyTransition(ScaleTransition())
     public static let slide = AnyTransition(SlideTransition())
+    public static let blurReplace = AnyTransition(BlurReplaceTransition())
 
     let applyTransition: @MainActor (AnyView, TransitionPhase) -> AnyView
     let properties: TransitionProperties
@@ -58,6 +59,12 @@ public struct AnyTransition: @unchecked Sendable {
 
     public static func push(from edge: Edge) -> AnyTransition {
         AnyTransition(PushTransition(edge: edge))
+    }
+
+    public static func blurReplace(
+        _ config: BlurReplaceTransition.Configuration = .downUp
+    ) -> AnyTransition {
+        AnyTransition(BlurReplaceTransition(config))
     }
 
     public static func scale(
