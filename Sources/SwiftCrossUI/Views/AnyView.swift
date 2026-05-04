@@ -59,7 +59,6 @@ public struct AnyView: TypeSafeView {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
-        children.proposedSize = proposedSize
         let childType = ObjectIdentifier(type(of: child))
 
         if childType != children.childType {
@@ -68,7 +67,6 @@ public struct AnyView: TypeSafeView {
                 backend: backend,
                 environment: environment
             )
-            children.currentView = AnyView(child)
             children.childType = childType
             children.widgetNeedsReinsertion = true
         }
@@ -126,9 +124,7 @@ public struct AnyView: TypeSafeView {
 class AnyViewChildren: ViewGraphNodeChildren {
     /// The erased underlying node.
     var node: ErasedViewGraphNode
-    var currentView: AnyView
     var childType: ObjectIdentifier
-    var proposedSize = ProposedViewSize.zero
     /// Stores whether or not the displayed view changed during computeLayout.
     var widgetNeedsReinsertion = false
 
@@ -147,7 +143,6 @@ class AnyViewChildren: ViewGraphNodeChildren {
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,
         environment: EnvironmentValues
     ) {
-        currentView = AnyView(view.child)
         childType = ObjectIdentifier(type(of: view.child))
         node = ErasedViewGraphNode(
             for: view.child,

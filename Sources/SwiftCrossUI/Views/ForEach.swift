@@ -86,8 +86,6 @@ extension ForEach: TypeSafeView, View where Child: View {
             )
         }
 
-        children.proposedSize = proposedSize
-        children.transition = environment.transition
         children.updateGeneration += 1
         let generation = children.updateGeneration
         let oldActiveKeys = children.activeKeys
@@ -660,8 +658,6 @@ class ForEachViewChildren<
     var activeKeys: [ItemKey] = []
     var renderKeys: [ItemKey] = []
     var committedRenderKeys: [ItemKey] = []
-    var transition = AnyTransition.opacity
-    var proposedSize = ProposedViewSize.zero
     var removalLayoutKeys: [ItemKey] = []
     var updateGeneration = 0
     var hasMounted = false

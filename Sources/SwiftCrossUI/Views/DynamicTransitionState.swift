@@ -6,7 +6,6 @@ final class DynamicTransitionState {
     var activeContent: DynamicTransitionContent?
     var activePhase: TransitionPhase = .identity
     private var removals: [RemovalTransition] = []
-    var proposedSize = ProposedViewSize.zero
     var widgetNeedsRebuild = false
     var removalGeneration = 0
     var hasMounted = false
@@ -25,8 +24,6 @@ final class DynamicTransitionState {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
-        self.proposedSize = proposedSize
-
         guard let content else {
             return updateToEmpty(
                 proposedSize: proposedSize,
