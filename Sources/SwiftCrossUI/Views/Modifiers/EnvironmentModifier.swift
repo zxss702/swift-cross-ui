@@ -65,7 +65,7 @@ extension View {
     /// Adds an observable object to the environment of the enclosed View.
     /// You are responsible for ensuring that the object is being observed
     /// by a parent view, as this modifier does not perform any observation.
-    public func environment<T: ObservableObject>(_ object: T) -> some View {
+    public func environment<T: AnyObject>(_ object: T) -> some View {
         EnvironmentModifier(self) { environment in
             var environment = environment
             environment[observable: T.self] = object

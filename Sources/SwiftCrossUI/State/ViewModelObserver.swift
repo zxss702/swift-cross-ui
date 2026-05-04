@@ -1,5 +1,8 @@
 import Foundation
 import PerceptionCore
+#if canImport(Observation)
+    import Observation
+#endif
 
 /// This protocol can be adopted by classes responsible for handling part of
 /// the view hierarchy. It makes it easy to automatically update the view when
@@ -76,6 +79,28 @@ extension ViewModelObserver {
 
         let perceptionTrackingID = UUID()
         self.currentViewModelObservationID = perceptionTrackingID
+        #if canImport(Observation)
+        if #available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0, *) {
+            return withObservationTracking(
+                {
+                    GraphUpdateContext.withUpdating {
+                        computation()
+                    }
+                },
+                onChange: { [backend, weak self] in
+                    let transaction = StateMutationContext.currentTransaction
+                        .overlaid(by: TransactionContext.current)
+                    backend.runInMainThread {
+                        guard let self, self.currentViewModelObservationID == perceptionTrackingID else { return }
+                        self.enqueueObservedChange(
+                            backend: backend,
+                            transaction: transaction
+                        )
+                    }
+                }
+            )
+        }
+        #endif
         return withPerceptionTracking {
             GraphUpdateContext.withUpdating {
                 computation()

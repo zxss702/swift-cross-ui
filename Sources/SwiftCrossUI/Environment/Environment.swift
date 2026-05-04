@@ -51,10 +51,8 @@ public struct Environment<Value>: DynamicProperty {
         switch mode {
             case .keyPath(let keyPath):
                 value.value = environment[keyPath: keyPath]
-            case .observableObject:
-                if let type = Value.self as? any ObservableObject.Type {
-                    value.value = (environment[observable: type] as! Value)
-                }
+            case .observableObject(let resolve):
+                value.value = resolve(environment)
         }
     }
 
@@ -80,16 +78,16 @@ public struct Environment<Value>: DynamicProperty {
         self.mode = .keyPath(keyPath)
     }
 
-    public init(_ type: Value.Type) where Value: ObservableObject {
+    public init(_ type: Value.Type) where Value: AnyObject {
         self.value = Box(nil)
-        self.mode = .observableObject
+        self.mode = .observableObject { environment in environment[observable: type] }
     }
 
     private enum Mode {
         /// A key path to the enviornment value to access.
         case keyPath(KeyPath<EnvironmentValues, Value>)
         /// An observable object.
-        case observableObject
+        case observableObject((EnvironmentValues) -> Value?)
 
         var pathDescription: String {
             switch self {
