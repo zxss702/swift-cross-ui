@@ -73,8 +73,12 @@ public struct AffineTransform: Equatable, Sendable, CustomDebugStringConvertible
     }
 
     public static func scaling(by factor: Double) -> AffineTransform {
+        scaling(x: factor, y: factor)
+    }
+
+    public static func scaling(x: Double, y: Double) -> AffineTransform {
         AffineTransform(
-            linearTransform: SIMD4(x: factor, y: 0.0, z: 0.0, w: factor),
+            linearTransform: SIMD4(x: x, y: 0.0, z: 0.0, w: y),
             translation: .zero
         )
     }
