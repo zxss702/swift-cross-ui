@@ -16,15 +16,8 @@ class AndroidBackendHelpers: JavaObject {
     func getWindowHeight(_ activity: Activity?) -> Int32
 
     @JavaMethod
-    func getPreferredFramesPerSecond(_ activity: Activity?) -> Float
+    func getSafeAreaLeftInset(_ activity: Activity?) -> Int32
 
     @JavaMethod
-    func runOnMainThread(_ action: SwiftAction?)
-
-    @JavaMethod
-    func textLayoutFragmentMetrics(
-        _ textView: AndroidKit.TextView?,
-        _ text: String,
-        _ proposedWidth: Int32
-    ) -> [Int32]
+    func getSafeAreaTopInset(_ activity: Activity?) -> Int32
 }
