@@ -21,7 +21,7 @@ class _App<AppRoot: App>: ViewModelObserver {
     let graphUpdateHost = GraphUpdateHost()
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
-    
+
     /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
     var currentViewModelObservationID: UUID?
 
@@ -55,7 +55,7 @@ class _App<AppRoot: App>: ViewModelObserver {
             )
         }
     }
-    
+
     func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
         enqueueRefreshSceneGraph(
             backend: backend,

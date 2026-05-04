@@ -1,8 +1,9 @@
 import Foundation
 import PerceptionCore
 
-/// This protocol can be adoopted by classes responsible for handling part of the view hierarchy. It makes
-/// it easy to automatically update the view when observable view models change.
+/// This protocol can be adopted by classes responsible for handling part of
+/// the view hierarchy. It makes it easy to automatically update the view when
+/// observable view models change.
 ///
 /// The most important rule: Every computation of a view's `body` MUST be performed inside a call to
 /// `observe()`. For example:
@@ -14,13 +15,13 @@ import PerceptionCore
 /// to `Observable` or `Perceptible` and used inside the `body` computation will have change.
 ///
 /// - Important: `self` MUST only be used to observe a single view because
-/// `viewModelDidChange()`will only be called for the most recent call to `observe()` in order to
+/// `viewModelDidChange()` will only be called for the most recent call to `observe()` in order to
 /// prevent duplicate view updates.
 @MainActor
 protocol ViewModelObserver: AnyObject, Sendable {
     /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
     var currentViewModelObservationID: UUID? { get set }
-    
+
     /// This method is called at most once after a call to `observe()` if an object conforming to
     /// `Observable` or `Perceptible` used in the `computation` closure of the last call to
     /// `observe()` has changed.

@@ -40,4 +40,3 @@ where Value: Equatable {
         value.magnitudeSquared
     }
 }
-

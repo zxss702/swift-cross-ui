@@ -70,7 +70,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
 
     /// The dynamic property updater for this view.
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
-    
+
     /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
     var currentViewModelObservationID: UUID?
 
@@ -157,7 +157,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
     var layoutIdentity: ObjectIdentifier {
         ObjectIdentifier(self)
     }
-    
+
     func viewModelDidChange<B: AppBackend>(backend: B) {
         let transaction = StateMutationContext.currentTransaction
             .overlaid(by: TransactionContext.current)

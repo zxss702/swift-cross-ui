@@ -76,7 +76,7 @@ import Foundation
     public var projectedValue: Bindable<Value> {
         self
     }
-    
+
     /// Creates a bindable wrapper around an observable or perceptible object.
     ///
     /// In most cases, apply the `@Bindable` attribute to a property or local
@@ -98,7 +98,7 @@ extension Bindable where Value : AnyObject {
             }
         )
     }
-    
+
     /// Creates a bindable wrapper around an observable or perceptible object.
     ///
     /// This initializer behaves the same as ``init(wrappedValue:)``, but reads

@@ -18,7 +18,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
     private let containerWidget: AnyWidget
     /// The window's preferred color scheme, cached from the last update.
     private var preferredColorScheme: ColorScheme?
-    
+
     /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
     var currentViewModelObservationID: UUID?
 
@@ -214,7 +214,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         if let preferredColorScheme {
             environment.colorScheme = preferredColorScheme
         }
-        
+
         let content = self.observe(in: backend) { newScene?.content() }
         let probingResult = viewGraph.computeLayout(
             with: content,
@@ -333,7 +333,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
             isFirstUpdate = false
         }
     }
-    
+
     func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
         enqueueUpdate(
             backend: backend,

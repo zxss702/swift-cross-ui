@@ -19,4 +19,3 @@ public struct UnitPoint: Hashable, Sendable {
         self.y = y
     }
 }
-
