@@ -8,6 +8,11 @@ public enum LayoutSystem {
     }
 
     package static func roundSize(_ size: Double) -> Int {
+        if size.isNaN {
+            logger.warning("LayoutSystem.roundSize(_:) called with NaN")
+            return 0
+        }
+
         if size.isInfinite {
             logger.warning("LayoutSystem.roundSize(_:) called with infinite size")
         }
@@ -50,12 +55,20 @@ public enum LayoutSystem {
     }
 
     public struct LayoutableChild {
+        struct LayoutState: Equatable {
+            var identity: ObjectIdentifier
+            var generation: Int
+        }
+
         private var computeLayout:
             @MainActor (
                 _ proposedSize: ProposedViewSize,
                 _ environment: EnvironmentValues
             ) -> ViewLayoutResult
         private var _commit: @MainActor () -> ViewLayoutResult
+        private var _prepareForLayout: @MainActor () -> Void
+        private var _layoutState: @MainActor () -> LayoutState?
+        var animationID: ObjectIdentifier?
         var tag: String?
 
         public init(
@@ -63,13 +76,38 @@ public enum LayoutSystem {
                 @escaping @MainActor (ProposedViewSize, EnvironmentValues) ->
                 ViewLayoutResult,
             commit: @escaping @MainActor () -> ViewLayoutResult,
+            animationID: ObjectIdentifier? = nil,
+            tag: String? = nil
+        ) {
+            self.init(
+                computeLayout: computeLayout,
+                commit: commit,
+                prepareForLayout: {},
+                layoutState: { nil },
+                animationID: animationID,
+                tag: tag
+            )
+        }
+
+        init(
+            computeLayout:
+                @escaping @MainActor (ProposedViewSize, EnvironmentValues) ->
+                ViewLayoutResult,
+            commit: @escaping @MainActor () -> ViewLayoutResult,
+            prepareForLayout: @escaping @MainActor () -> Void,
+            layoutState: @escaping @MainActor () -> LayoutState?,
+            animationID: ObjectIdentifier? = nil,
             tag: String? = nil
         ) {
             self.computeLayout = computeLayout
             self._commit = commit
+            self._prepareForLayout = prepareForLayout
+            self._layoutState = layoutState
+            self.animationID = animationID
             self.tag = tag
         }
 
+        @MainActor
         init<Child: View>(
             _ node: AnyViewGraphNode<Child>,
             child: @escaping @Sendable @MainActor () -> Child?
@@ -84,8 +122,57 @@ public enum LayoutSystem {
                 },
                 commit: {
                     node.commit()
-                }
+                },
+                prepareForLayout: {
+                    node.prepareLayoutWithNewView(child())
+                },
+                layoutState: {
+                    LayoutState(
+                        identity: node.layoutIdentity(),
+                        generation: node.layoutGeneration()
+                    )
+                },
+                animationID: ObjectIdentifier(node.widget.widget as AnyObject)
             )
+        }
+
+        @MainActor
+        init(
+            _ node: ErasedViewGraphNode,
+            child: @escaping @Sendable @MainActor () -> Any?
+        ) {
+            self.init(
+                computeLayout: { proposedSize, environment in
+                    node.computeLayoutWithNewView(
+                        child(),
+                        proposedSize,
+                        environment
+                    ).size
+                },
+                commit: {
+                    node.commit()
+                },
+                prepareForLayout: {
+                    _ = node.prepareLayoutWithNewView(child())
+                },
+                layoutState: {
+                    LayoutState(
+                        identity: node.layoutIdentity(),
+                        generation: node.layoutGeneration()
+                    )
+                },
+                animationID: ObjectIdentifier(node.getWidget().widget as AnyObject)
+            )
+        }
+
+        @MainActor
+        func prepareForLayout() {
+            _prepareForLayout()
+        }
+
+        @MainActor
+        func layoutState() -> LayoutState? {
+            _layoutState()
         }
 
         @MainActor
@@ -108,7 +195,7 @@ public enum LayoutSystem {
     ///   ``Group`` to avoid changing stack layout participation (since ``Group``
     ///   is meant to appear completely invisible to the layout system).
     @MainActor
-    static func computeStackLayout<Backend: AppBackend>(
+    static func computeStackLayout<Backend: BaseAppBackend>(
         container: Backend.Widget,
         children: [LayoutableChild],
         cache: inout StackLayoutCache,
@@ -168,7 +255,8 @@ public enum LayoutSystem {
                     shouldRedistributeSpaceOnCommit(
                         proposedSize: proposedSize,
                         orientation: orientation
-                    )
+                    ),
+                signature: nil
             )
 
             return ViewLayoutResult(
@@ -184,11 +272,23 @@ public enum LayoutSystem {
             fatalError("unreachable")
         }
 
-        cache = recomputeCache(
+        for child in children {
+            child.prepareForLayout()
+        }
+
+        let signature = stackCacheSignature(
             children: children,
             proposedSize: proposedSize,
             environment: environment
         )
+        if signature == nil || cache.signature != signature || cache.priorityGroups.isEmpty {
+            cache = recomputeCache(
+                children: children,
+                proposedSize: proposedSize,
+                environment: environment,
+                signature: signature
+            )
+        }
 
         let renderedChildren = computeLayouts(
             of: children,
@@ -229,6 +329,26 @@ public enum LayoutSystem {
         proposedSize[component: orientation.perpendicular] == nil
     }
 
+    @MainActor
+    private static func stackCacheSignature(
+        children: [LayoutableChild],
+        proposedSize: ProposedViewSize,
+        environment: EnvironmentValues
+    ) -> StackLayoutCache.Signature? {
+        let childStates = children.map { $0.layoutState() }
+        guard childStates.allSatisfy({ $0 != nil }) else {
+            return nil
+        }
+        return StackLayoutCache.Signature(
+            orientation: environment.layoutOrientation,
+            spacing: environment.layoutSpacing,
+            proposedPerpendicular:
+                proposedSize[component: environment.layoutOrientation.perpendicular],
+            environment: environment.layoutInputFingerprint,
+            children: childStates.map { $0! }
+        )
+    }
+
     /// Computes the cache from scratch for the slow path (this is our last
     /// resort if shortcuts can't be made), preparing it for subsequent layout
     /// operations.
@@ -236,7 +356,8 @@ public enum LayoutSystem {
     static func recomputeCache(
         children: [LayoutableChild],
         proposedSize: ProposedViewSize,
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        signature: StackLayoutCache.Signature?
     ) -> StackLayoutCache {
         let orientation = environment.layoutOrientation
         let spacing = environment.layoutSpacing
@@ -319,19 +440,21 @@ public enum LayoutSystem {
             redistributeSpaceOnCommit: shouldRedistributeSpaceOnCommit(
                 proposedSize: proposedSize,
                 orientation: orientation
-            )
+            ),
+            signature: signature
         )
     }
 
     @MainActor
-    static func commitStackLayout<Backend: AppBackend>(
+    static func commitStackLayout<Backend: BaseAppBackend>(
         container: Backend.Widget,
         children: [LayoutableChild],
         cache: inout StackLayoutCache,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
-        backend: Backend
-    ) {
+        backend: Backend,
+        childIndices: [Int]? = nil
+    ) -> [Position] {
         let size = layout.size
         backend.setSize(of: container, to: size.vector)
 
@@ -340,7 +463,7 @@ public enum LayoutSystem {
         let orientation = environment.layoutOrientation
         let perpendicularOrientation = orientation.perpendicular
 
-        if cache.redistributeSpaceOnCommit {
+        if cache.redistributeSpaceOnCommit && !RenderFrameContext.isRendering {
             _ = computeLayouts(
                 of: children,
                 proposedLength: layout.size[component: orientation],
@@ -352,6 +475,10 @@ public enum LayoutSystem {
         }
 
         let renderedChildren = children.map { $0.commit() }
+        var childPositions = Array(
+            repeating: Position.zero,
+            count: renderedChildren.count
+        )
 
         var position = Position.zero
         for (index, child) in renderedChildren.enumerated() {
@@ -376,10 +503,30 @@ public enum LayoutSystem {
                     position[component: perpendicularOrientation] = outer - inner
             }
 
-            backend.setPosition(ofChildAt: index, in: container, to: position.vector)
+            let childPosition: Position
+            if let animationID = children[index].animationID {
+                childPosition = LayoutPresentationStore.shared.position(
+                    for: animationID,
+                    target: position,
+                    transaction: environment.transaction,
+                    environment: environment
+                ) { transaction in
+                    environment.requestRenderFrame(transaction)
+                }
+            } else {
+                childPosition = position
+            }
+
+            childPositions[index] = childPosition
+            backend.setPosition(
+                ofChildAt: childIndices?[index] ?? index,
+                in: container,
+                to: childPosition.vector
+            )
 
             position[component: orientation] += child.size[component: orientation] + Double(spacing)
         }
+        return childPositions
     }
 
     /// The main stack layout space allocation algorithm. Used during

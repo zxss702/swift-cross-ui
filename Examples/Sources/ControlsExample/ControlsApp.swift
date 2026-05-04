@@ -21,6 +21,11 @@ enum BuiltInPickerStyle: CaseIterable, Equatable {
     }
 }
 
+#if canImport(AndroidBackend)
+    // TODO(bbrk24): Update this once AndroidBackend supports scrolling
+    typealias ScrollView = VStack
+#endif
+
 @main
 @HotReloadable
 struct ControlsApp: App {
@@ -56,19 +61,21 @@ struct ControlsApp: App {
                             Text("Count: \(count)")
                         }
 
-                        VStack {
-                            Text("Menu button")
-                            Menu("Menu") {
-                                Button("Button item") {
-                                    print("Button item clicked")
-                                }
-                                Toggle("Toggle item", isOn: $menuToggleState)
-                                Menu("Submenu") {
-                                    Text("Text item 1")
-                                    Text("Text item 2")
+                        #if !canImport(AndroidBackend)
+                            VStack {
+                                Text("Menu button")
+                                Menu("Menu") {
+                                    Button("Button item") {
+                                        print("Button item clicked")
+                                    }
+                                    Toggle("Toggle item", isOn: $menuToggleState)
+                                    Menu("Submenu") {
+                                        Text("Text item 1")
+                                        Text("Text item 2")
+                                    }
                                 }
                             }
-                        }
+                        #endif
 
                         #if !canImport(UIKitBackend)
                             VStack {
@@ -93,37 +100,39 @@ struct ControlsApp: App {
                             Text("Currently enabled: \(exampleCheckboxState)")
                         }
 
-                        #if !os(tvOS)
+                        #if !canImport(AndroidBackend)
+                            #if !os(tvOS)
+                                VStack {
+                                    Text("Slider")
+                                    Slider(value: $sliderValue, in: 0...10)
+                                        .frame(maxWidth: 200)
+                                    Text("Value: \(String(format: "%.02f", sliderValue))")
+                                }
+                            #endif
+
                             VStack {
-                                Text("Slider")
-                                Slider(value: $sliderValue, in: 0...10)
-                                    .frame(maxWidth: 200)
-                                Text("Value: \(String(format: "%.02f", sliderValue))")
+                                Text("Text field")
+                                TextField("Text field", text: $text)
+                                Text("Value: \(text)")
                             }
-                        #endif
 
-                        VStack {
-                            Text("Text field")
-                            TextField("Text field", text: $text)
-                            Text("Value: \(text)")
-                        }
-
-                        VStack {
-                            Text("Secure text field")
-                            SecureField("Secure text field", text: $secureText)
-                            Text("Value: \(secureText)")
-                        }
-
-                        #if !os(tvOS)
                             VStack {
-                                Toggle(
-                                    "Enable ProgressView resizability",
-                                    isOn: $isProgressViewResizable)
-                                Slider(value: $progressViewSize, in: 10...100)
-                                ProgressView()
-                                    .resizable(isProgressViewResizable)
-                                    .frame(width: progressViewSize, height: progressViewSize)
+                                Text("Secure text field")
+                                SecureField("Secure text field", text: $secureText)
+                                Text("Value: \(secureText)")
                             }
+
+                            #if !os(tvOS)
+                                VStack {
+                                    Toggle(
+                                        "Enable ProgressView resizability",
+                                        isOn: $isProgressViewResizable)
+                                    Slider(value: $progressViewSize, in: 10...100)
+                                    ProgressView()
+                                        .resizable(isProgressViewResizable)
+                                        .frame(width: progressViewSize, height: progressViewSize)
+                                }
+                            #endif
                         #endif
 
                         #if !canImport(Gtk3Backend)
@@ -154,7 +163,7 @@ struct ControlsApp: App {
                                 Text("You chose: \(flavor ?? "Nothing yet!")")
                             }
 
-                            #if !os(tvOS)
+                            #if !os(tvOS) && !canImport(AndroidBackend)
                                 VStack {
                                     Text("Selected date: \(date)")
 

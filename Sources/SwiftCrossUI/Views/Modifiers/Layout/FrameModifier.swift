@@ -115,7 +115,7 @@ struct StrictFrameView<Child: View>: TypeSafeView {
         self.alignment = alignment
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -123,7 +123,7 @@ struct StrictFrameView<Child: View>: TypeSafeView {
         body.children(backend: backend, snapshots: snapshots, environment: environment)
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: TupleViewChildren1<Child>,
         backend: Backend
     ) -> Backend.Widget {
@@ -132,7 +132,7 @@ struct StrictFrameView<Child: View>: TypeSafeView {
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: TupleViewChildren1<Child>,
         proposedSize: ProposedViewSize,
@@ -163,7 +163,7 @@ struct StrictFrameView<Child: View>: TypeSafeView {
         )
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: TupleViewChildren1<Child>,
         layout: ViewLayoutResult,
@@ -179,6 +179,20 @@ struct StrictFrameView<Child: View>: TypeSafeView {
         )
         backend.setSize(of: widget, to: frameSize.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: childPosition)
+    }
+}
+
+extension StrictFrameView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: body.view0,
+            values: [
+                AnyHashable(width),
+                AnyHashable(height),
+                AnyHashable(String(describing: alignment)),
+            ]
+        )
     }
 }
 
@@ -216,7 +230,7 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         self.alignment = alignment
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -224,7 +238,7 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         body.children(backend: backend, snapshots: snapshots, environment: environment)
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: TupleViewChildren1<Child>,
         backend: Backend
     ) -> Backend.Widget {
@@ -256,7 +270,7 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         )
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: TupleViewChildren1<Child>,
         proposedSize: ProposedViewSize,
@@ -303,7 +317,7 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         )
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: TupleViewChildren1<Child>,
         layout: ViewLayoutResult,
@@ -349,5 +363,23 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         )
         backend.setSize(of: widget, to: frameSize.vector)
         backend.setPosition(ofChildAt: 0, in: widget, to: childPosition)
+    }
+}
+
+extension FlexibleFrameView: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.wrapping(
+            Self.self,
+            child: body.view0,
+            values: [
+                AnyHashable(minWidth),
+                AnyHashable(idealWidth),
+                AnyHashable(maxWidth),
+                AnyHashable(minHeight),
+                AnyHashable(idealHeight),
+                AnyHashable(maxHeight),
+                AnyHashable(String(describing: alignment)),
+            ]
+        )
     }
 }

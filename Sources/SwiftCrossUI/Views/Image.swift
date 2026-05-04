@@ -51,14 +51,14 @@ extension Image: View {
 }
 
 extension Image: TypeSafeView {
-    func layoutableChildren<Backend: AppBackend>(
+    func layoutableChildren<Backend: BaseAppBackend>(
         backend: Backend,
         children: ImageChildren
     ) -> [LayoutSystem.LayoutableChild] {
         []
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -66,14 +66,14 @@ extension Image: TypeSafeView {
         ImageChildren(backend: backend)
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: ImageChildren,
         backend: Backend
     ) -> Backend.Widget {
         children.container.into()
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: ImageChildren,
         proposedSize: ProposedViewSize,
@@ -84,6 +84,8 @@ extension Image: TypeSafeView {
         if source != children.cachedImageSource {
             switch source {
                 case .url(let url, let useFileExtension):
+                    // TODO: Propagate these errors somewhere. Maybe even just as trace
+                    //   log messages.
                     if let data = try? Data(contentsOf: url) {
                         let bytes = Array(data)
                         if useFileExtension {
@@ -123,7 +125,7 @@ extension Image: TypeSafeView {
         return ViewLayoutResult.leafView(size: size)
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: ImageChildren,
         layout: ViewLayoutResult,
@@ -159,7 +161,9 @@ extension Image: TypeSafeView {
                 }
                 children.isContainerEmpty = false
             } else {
-                backend.removeAllChildren(of: children.container.into())
+                if !children.isContainerEmpty {
+                    backend.removeAllChildren(of: children.container.into())
+                }
                 children.isContainerEmpty = true
             }
             children.imageChanged = false
@@ -182,7 +186,7 @@ package class ImageChildren: ViewGraphNodeChildren {
     var isContainerEmpty = true
     var lastScaleFactor: Double = 1
 
-    init<Backend: AppBackend>(backend: Backend) {
+    init<Backend: BaseAppBackend>(backend: Backend) {
         container = AnyWidget(backend.createContainer())
         imageWidget = AnyWidget(backend.createImageView())
     }

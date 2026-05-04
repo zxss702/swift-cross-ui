@@ -88,6 +88,111 @@ extension UIKitBackend {
         )
     }
 
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        let attributedString = UIKitBackend.attributedString(text: text, environment: environment)
+        let storage = NSTextStorage(attributedString: attributedString)
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(
+            size: CGSize(
+                width: proposedWidth.map(Double.init) ?? .greatestFiniteMagnitude,
+                height: proposedHeight.map(Double.init) ?? .greatestFiniteMagnitude
+            )
+        )
+        textContainer.lineFragmentPadding = 0
+        textContainer.lineBreakMode = proposedHeight == nil ? .byWordWrapping : .byTruncatingTail
+        textContainer.maximumNumberOfLines = environment.lineLimitSettings?.limit ?? 0
+
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+
+        var fragments: [TextLayoutFragment] = []
+        var characterIndex = 0
+        var lowerBound = text.startIndex
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            let characterRange = NSRange(range, in: text)
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: characterRange,
+                actualCharacterRange: nil
+            )
+
+            let rect: CGRect
+            let baseline: Int
+            if glyphRange.length > 0 {
+                let lineRect = layoutManager.lineFragmentRect(
+                    forGlyphAt: glyphRange.location,
+                    effectiveRange: nil
+                )
+                let glyphLocation = layoutManager.location(
+                    forGlyphAt: glyphRange.location
+                )
+                let inkRect = layoutManager.boundingRect(
+                    forGlyphRange: glyphRange,
+                    in: textContainer
+                )
+                let originX = lineRect.minX + glyphLocation.x
+                let nextGlyphIndex = NSMaxRange(glyphRange)
+                let endX: CGFloat
+                if nextGlyphIndex < layoutManager.numberOfGlyphs {
+                    let nextLineRect = layoutManager.lineFragmentRect(
+                        forGlyphAt: nextGlyphIndex,
+                        effectiveRange: nil
+                    )
+                    let nextGlyphLocation = layoutManager.location(
+                        forGlyphAt: nextGlyphIndex
+                    )
+                    let nextX = nextLineRect.minX + nextGlyphLocation.x
+                    endX = nextX >= originX ? nextX : inkRect.maxX
+                } else {
+                    endX = inkRect.maxX
+                }
+                let width = max(0, max(endX - originX, inkRect.width))
+                rect = CGRect(
+                    x: originX,
+                    y: lineRect.minY,
+                    width: width,
+                    height: lineRect.height
+                )
+                baseline = Int((lineRect.minY + glyphLocation.y).rounded(.down))
+            } else {
+                rect = .zero
+                baseline = 0
+            }
+
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(
+                        Int(rect.minX.rounded(.down)),
+                        Int(rect.minY.rounded(.down))
+                    ),
+                    size: SIMD2(
+                        Int(rect.width.rounded(.awayFromZero)),
+                        Int(rect.height.rounded(.awayFromZero))
+                    ),
+                    baseline: baseline
+                )
+            )
+            characterIndex += 1
+            lowerBound = upperBound
+        }
+
+        return fragments
+    }
+
     public func createImageView() -> Widget {
         WrapperWidget<UIImageView>()
     }

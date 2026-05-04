@@ -1,4 +1,5 @@
 import CGtk
+import Dispatch
 import Foundation
 import Gtk
 import SwiftCrossUI
@@ -12,7 +13,24 @@ extension App {
     }
 }
 
-public final class GtkBackend: AppBackend {
+public final class GtkBackend:
+    BaseAppBackend,
+    BackendFeatures.IncomingURLs,
+    BackendFeatures.ExternalURLs,
+    BackendFeatures.RevealFiles,
+    BackendFeatures.ApplicationMenus,
+    BackendFeatures.FileDialogs,
+    BackendFeatures.Alerts,
+    BackendFeatures.Sheets,
+    BackendFeatures.CornerRadius,
+    BackendFeatures.Gestures,
+    BackendFeatures.PopoverMenus,
+    BackendFeatures.Paths,
+    BackendFeatures.Tooltips,
+    BackendFeatures.Colors,
+    BackendFeatures.DatePickers,
+    BackendFeatures.Windowing
+{
     public typealias Window = Gtk.ApplicationWindow
     public typealias Widget = Gtk.Widget
     public typealias Menu = Gtk.PopoverMenu
@@ -34,8 +52,6 @@ public final class GtkBackend: AppBackend {
     public let scrollBarWidth = 0
     public let requiresToggleSwitchSpacer = false
     public let requiresImageUpdateOnScaleFactorChange = false
-    public let menuImplementationStyle = MenuImplementationStyle.dynamicPopover
-    public let canRevealFiles = true
     public let supportsMultipleWindows = true
     public let deviceClass = DeviceClass.desktop
     public let defaultSheetCornerRadius = 10
@@ -80,7 +96,7 @@ public final class GtkBackend: AppBackend {
         #endif
     }
 
-    // A separate initializer to satisfy ``AppBackend``'s requirements.
+    // A separate initializer to satisfy `BackendFeatures.Core`'s requirements.
     public convenience init() {
         self.init(appIdentifier: nil)
     }
@@ -138,7 +154,9 @@ public final class GtkBackend: AppBackend {
 
     private static func mainRunLoopTicklingLoop(nextDelayMilliseconds: Int? = nil) {
         Self.runInMainThread(afterMilliseconds: nextDelayMilliseconds ?? 50) {
+            // This performs one pass through the run loop
             let nextDate = RunLoop.main.limitDate(forMode: .default)
+
             // This isn't expected to be nil, but if it is we can just loop
             // again quickly with the default delay.
             let nextDelay = nextDate.map {
@@ -455,8 +473,9 @@ public final class GtkBackend: AppBackend {
 
                 let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
                     .takeUnretainedValue()
+                let innerAction = action.action
                 MainActor.assumeIsolated {
-                    action.action()
+                    innerAction()
                 }
 
                 return 0
@@ -464,6 +483,42 @@ public final class GtkBackend: AppBackend {
             Unmanaged<ThreadActionContext>.passRetained(action).toOpaque(),
             { _ in }
         )
+    }
+
+    public nonisolated var preferredFramesPerSecond: Double {
+        MainActor.assumeIsolated {
+            Self.currentDisplayRefreshRate()
+        }
+    }
+
+    private static func currentDisplayRefreshRate() -> Double {
+        guard let display = gdk_display_get_default(),
+            let monitors = gdk_display_get_monitors(display)
+        else {
+            return 60
+        }
+
+        let count = g_list_model_get_n_items(monitors)
+        for index in 0..<count {
+            guard let monitor = g_list_model_get_item(monitors, index) else {
+                continue
+            }
+            defer {
+                g_object_unref(monitor)
+            }
+
+            let refreshRate = gdk_monitor_get_refresh_rate(OpaquePointer(monitor))
+            if refreshRate > 0 {
+                let framesPerSecond = Double(refreshRate) / 1_000
+                if framesPerSecond >= 24 {
+                    return framesPerSecond
+                } else if refreshRate >= 24 && refreshRate <= 240 {
+                    return Double(refreshRate)
+                }
+            }
+        }
+
+        return 60
     }
 
     private static func runInMainThread(
@@ -481,8 +536,9 @@ public final class GtkBackend: AppBackend {
 
                 let action = Unmanaged<ThreadActionContext>.fromOpaque(context)
                     .takeUnretainedValue()
+                let innerAction = action.action
                 MainActor.assumeIsolated {
-                    action.action()
+                    innerAction()
                 }
 
                 // Cancel the recurring timeout after one iteration
@@ -498,7 +554,7 @@ public final class GtkBackend: AppBackend {
             .with(\.appPhase, windows.contains(where: \.isActive) ? .active : .inactive)
     }
 
-    public func setRootEnvironmentChangeHandler(to action: @escaping () -> Void) {
+    public func setRootEnvironmentChangeHandler(to action: @escaping @Sendable @MainActor () -> Void) {
         // TODO: React to theme changes
         self.rootEnvironmentChangeHandler = action
     }
@@ -514,7 +570,7 @@ public final class GtkBackend: AppBackend {
 
     public func setWindowEnvironmentChangeHandler(
         of window: Window,
-        to action: @escaping () -> Void
+        to action: @escaping @Sendable @MainActor () -> Void
     ) {
         // TODO: Notify when window scale factor changes
     }
@@ -538,7 +594,9 @@ public final class GtkBackend: AppBackend {
     // MARK: Containers
 
     public func createContainer() -> Widget {
-        return Fixed()
+        let container = Fixed()
+        container.overflow = .visible
+        return container
     }
 
     public func removeAllChildren(of container: Widget) {
@@ -548,16 +606,25 @@ public final class GtkBackend: AppBackend {
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         let container = container as! Fixed
+        let index = min(max(index, 0), container.children.count)
         container.put(child, index: index, x: 0, y: 0)
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            logger.warning("attempted to set position of non-existent container child")
+            return
+        }
         container.move(container.children[index], x: Double(position.x), y: Double(position.y))
     }
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Fixed
+        guard container.children.indices.contains(index) else {
+            logger.warning("attempted to remove non-existent container child")
+            return
+        }
         let child = container.children[index]
         container.remove(child)
     }
@@ -569,6 +636,12 @@ public final class GtkBackend: AppBackend {
         // end up with unexpected z ordering. If that becomes an issue we may
         // have to make a custom replacement for Gtk.Fixed.
         let container = container as! Fixed
+        guard container.children.indices.contains(firstIndex),
+            container.children.indices.contains(secondIndex)
+        else {
+            logger.warning("attempted to swap container child out of bounds")
+            return
+        }
         container.children.swapAt(firstIndex, secondIndex)
     }
 
@@ -584,6 +657,7 @@ public final class GtkBackend: AppBackend {
     }
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
+        widget.overflow = radius > 0 ? .hidden : .visible
         widget.css.set(property: .cornerRadius(radius))
     }
 
@@ -596,7 +670,50 @@ public final class GtkBackend: AppBackend {
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
-        widget.setSizeRequest(width: size.x, height: size.y)
+        widget.setSizeRequest(width: max(size.x, 0), height: max(size.y, 0))
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        widget.opacity = min(max(opacity, 0), 1)
+    }
+
+    public func setTransform(of widget: Widget, to transform: SwiftCrossUI.AffineTransform) {
+        widget.overflow = .visible
+        widget.css.set(
+            property: CSSProperty(
+                key: "transform",
+                value:
+                    "matrix(\(transform.linearTransform.x), \(transform.linearTransform.z), "
+                    + "\(transform.linearTransform.y), \(transform.linearTransform.w), "
+                    + "\(transform.translation.x), \(transform.translation.y))"
+            )
+        )
+        widget.css.set(property: CSSProperty(key: "transform-origin", value: "0 0"))
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        let radius = max(radius, 0)
+        widget.overflow = .visible
+        widget.css.set(
+            property: CSSProperty(
+                key: "filter",
+                value: radius == 0 ? "none" : "blur(\(radius)px)"
+            )
+        )
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        if visible {
+            widget.show()
+        } else {
+            widget.hide()
+        }
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        widget.css.set(
+            property: CSSProperty(key: "z-index", value: "\(Int(zIndex.rounded()))")
+        )
     }
 
     public func createSplitView(leadingChild: Widget, trailingChild: Widget) -> Widget {
@@ -825,6 +942,94 @@ public final class GtkBackend: AppBackend {
         }
 
         return SIMD2(width, imposedHeight)
+    }
+
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        let ellipsize: EllipsizeMode
+        if let widget = widget as? CustomLabel {
+            ellipsize = widget.ellipsize
+        } else if widget is TextView {
+            ellipsize = .none
+        } else {
+            return nil
+        }
+
+        let pangoContext = gtk_widget_create_pango_context(widget.widgetPointer)!
+        let layout = pango_layout_new(pangoContext)!
+        defer {
+            g_object_unref(UnsafeMutableRawPointer(layout))
+            g_object_unref(UnsafeMutableRawPointer(pangoContext))
+        }
+
+        pango_layout_set_text(layout, text, Int32(text.utf8.count))
+        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR)
+        pango_layout_set_ellipsize(
+            layout,
+            (proposedHeight == nil ? EllipsizeMode.none : ellipsize).toGtk()
+        )
+        if let proposedWidth {
+            pango_layout_set_width(
+                layout,
+                Int32((Double(proposedWidth) * Double(PANGO_SCALE)).rounded(.towardZero))
+            )
+        }
+        if let proposedHeight {
+            pango_layout_set_height(
+                layout,
+                Int32((Double(proposedHeight) * Double(PANGO_SCALE)).rounded(.towardZero))
+            )
+        }
+
+        return textLayoutFragments(of: text, in: layout)
+    }
+
+    private func textLayoutFragments(
+        of text: String,
+        in layout: OpaquePointer
+    ) -> [TextLayoutFragment] {
+        var fragments: [TextLayoutFragment] = []
+        var characterIndex = 0
+        var byteIndex = 0
+        var lowerBound = text.startIndex
+
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            var rect = PangoRectangle()
+            pango_layout_index_to_pos(layout, Int32(byteIndex), &rect)
+
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(
+                        Int((Double(rect.x) / Double(PANGO_SCALE)).rounded(.down)),
+                        Int((Double(rect.y) / Double(PANGO_SCALE)).rounded(.down))
+                    ),
+                    size: SIMD2(
+                        max(1, Int((Double(rect.width) / Double(PANGO_SCALE)).rounded(.up))),
+                        max(1, Int((Double(rect.height) / Double(PANGO_SCALE)).rounded(.up)))
+                    ),
+                    baseline: 0
+                )
+            )
+
+            byteIndex += text[range].utf8.count
+            characterIndex += 1
+            lowerBound = upperBound
+        }
+
+        return fragments
     }
 
     public func createImageView() -> Widget {

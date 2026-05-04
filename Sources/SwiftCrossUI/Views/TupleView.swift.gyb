@@ -20,6 +20,15 @@ private func layoutableChild<V: View>(
         commit: {
             node.commit()
         },
+        prepareForLayout: {
+            node.prepareLayoutWithNewView(view)
+        },
+        layoutState: {
+            LayoutSystem.LayoutableChild.LayoutState(
+                identity: node.layoutIdentity(),
+                generation: node.layoutGeneration()
+            )
+        },
         tag: "\(type(of: view))"
     )
 }
@@ -30,7 +39,7 @@ protocol TupleView: TypeSafeView {}
 
 extension TupleView {
     @MainActor
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: Children,
         backend: Backend
     ) -> Backend.Widget {
@@ -39,7 +48,7 @@ extension TupleView {
     }
 
     @MainActor
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -57,7 +66,7 @@ extension TupleView {
     }
 
     @MainActor
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -74,6 +83,15 @@ extension TupleView {
         )
     }
 }
+
+% if i == 0:
+extension ${view}: TransitionTraitProvider {
+    var transitionTrait: AnyTransition? {
+        (view0 as? TransitionTraitProvider)?.transitionTrait
+    }
+}
+
+% end
 
 % for i in range(maximum_view_count):
 %{
@@ -107,7 +125,7 @@ extension ${view}: View {
 extension ${view}: TupleView {
     typealias Children = TupleViewChildren${i + 1}<${children_type_parameters}>
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -118,7 +136,7 @@ extension ${view}: TupleView {
         )
     }
 
-    func layoutableChildren<Backend: AppBackend>(
+    func layoutableChildren<Backend: BaseAppBackend>(
         backend: Backend,
         children: Children
     ) -> [LayoutSystem.LayoutableChild] {
@@ -127,5 +145,22 @@ extension ${view}: TupleView {
             layoutableChild(node: children.child${j}, view: view${j}),
             % end
         ]
+    }
+}
+
+extension ${view}: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        let childKeys = [
+            % for j in range(i + 1):
+            LayoutInputKeys.key(for: view${j}),
+            % end
+        ]
+        guard childKeys.allSatisfy({ $0 != nil }) else {
+            return nil
+        }
+        return LayoutInputKeys.make(
+            Self.self,
+            values: childKeys.map { $0! }
+        )
     }
 }

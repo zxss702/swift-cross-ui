@@ -111,7 +111,7 @@ extension View where Self: WinUIElementRepresentable {
         preconditionFailure("This should never be called")
     }
 
-    public func children<Backend: AppBackend>(
+    public func children<Backend: BaseAppBackend>(
         backend _: Backend,
         snapshots _: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment _: EnvironmentValues
@@ -119,14 +119,14 @@ extension View where Self: WinUIElementRepresentable {
         EmptyViewChildren()
     }
 
-    public func layoutableChildren<Backend: AppBackend>(
+    public func layoutableChildren<Backend: BaseAppBackend>(
         backend _: Backend,
         children _: any ViewGraphNodeChildren
     ) -> [LayoutSystem.LayoutableChild] {
         []
     }
 
-    public func asWidget<Backend: AppBackend>(
+    public func asWidget<Backend: BaseAppBackend>(
         _: any ViewGraphNodeChildren,
         backend _: Backend
     ) -> Backend.Widget {
@@ -137,7 +137,7 @@ extension View where Self: WinUIElementRepresentable {
         }
     }
 
-    public func computeLayout<Backend: AppBackend>(
+    public func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: any ViewGraphNodeChildren,
         proposedSize: ProposedViewSize,
@@ -162,7 +162,7 @@ extension View where Self: WinUIElementRepresentable {
         return ViewLayoutResult.leafView(size: size)
     }
 
-    public func commit<Backend: AppBackend>(
+    public func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: any ViewGraphNodeChildren,
         layout: ViewLayoutResult,
@@ -202,7 +202,8 @@ final class RepresentingWidget<Representable: WinUIElementRepresentable>: WinUI.
         super.init()
     }
 
-    nonisolated(unsafe) var child: Representable.WinUIElementType?
+    var child: Representable.WinUIElementType?
+    var cleanUp: (@MainActor @Sendable () -> Void)?
 
     func update(with environment: EnvironmentValues) {
         if var context, let child {
@@ -220,17 +221,21 @@ final class RepresentingWidget<Representable: WinUIElementRepresentable>: WinUI.
             self.child = child
             self.context = context
         }
+
+        // Work around nonisolated deinit
+        let child = child
+        let context = context
+        cleanUp = {
+            if let context, let child {
+                Representable.dismantleWinUIElement(child, coordinator: context.coordinator)
+            }
+        }
     }
 
     deinit {
-        let context = context
-        let child = child
-        MainActor.assumeIsolated {
-            if let context, let child {
-                Representable.dismantleWinUIElement(
-                    child,
-                    coordinator: context.coordinator
-                )
+        if let cleanUp {
+            Task { @MainActor in
+                cleanUp()
             }
         }
     }

@@ -6,6 +6,7 @@ An overview of the examples included with SwiftCrossUI.
 
 A few examples are included with SwiftCrossUI to demonstrate some of its basic features;
 
+- `MusicPlayerExample`, an offline music player that lets users create and persist their own playlists of audio files.
 - `CounterExample`, a simple app with buttons to increase and decrease a count.
 - `RandomNumberGeneratorExample`, a simple app to generate random numbers between a minimum and maximum.
 - `WindowingExample`, a simple app showcasing how ``WindowGroup`` is used to make multi-window apps and
@@ -21,6 +22,8 @@ A few examples are included with SwiftCrossUI to demonstrate some of its basic f
 - `PathsExample`, an app showcasing the use of ``Path`` to draw various shapes.
 - `WebViewExample`, an app showcasing the use of ``WebView`` to display websites. Only works on Apple platforms so far.
 - `AdvancedCustomizationExample`, an app showcasing SwiftCrossUI's more advanced APIs for customizing the underlying native views of your app.
+- `AnimationExample`, an app showcasing transaction-based animation, binding animation,
+  keyframes, phases, content transitions, and structural transitions.
 
 ## Running examples
 

@@ -28,9 +28,11 @@ public class ViewGraph<Root: View> {
 
     /// The environment most recently provided by this node's parent scene.
     private var parentEnvironment: EnvironmentValues
+    private let graphUpdateHost: GraphUpdateHost
+    var updateHost: GraphUpdateHost { graphUpdateHost }
 
     private var isFirstUpdate = true
-    private var setIncomingURLHandler: (@escaping (URL) -> Void) -> Void
+    private var setIncomingURLHandler: ((@escaping (URL) -> Void) -> Void)?
 
     /// Creates a view graph for a root view with a specific backend.
     ///
@@ -38,19 +40,26 @@ public class ViewGraph<Root: View> {
     ///   - view: The root view to create a graph for.
     ///   - backend: The app's backend.
     ///   - environment: The current environment.
-    public init<Backend: AppBackend>(
+    public init<Backend: BaseAppBackend>(
         for view: Root,
         backend: Backend,
         environment: EnvironmentValues
     ) {
-        rootNode = AnyViewGraphNode(for: view, backend: backend, environment: environment)
+        graphUpdateHost = environment.graphUpdateHost ?? GraphUpdateHost()
+        let graphEnvironment = environment.with(\.graphUpdateHost, graphUpdateHost)
+        rootNode = AnyViewGraphNode(
+            for: view,
+            backend: backend,
+            environment: graphEnvironment
+        )
 
         self.view = view
         latestProposal = .zero
         committedProposal = .zero
-        parentEnvironment = environment
+        parentEnvironment = graphEnvironment
         currentRootViewResult = ViewLayoutResult.leafView(size: .zero)
-        setIncomingURLHandler = backend.setIncomingURLHandler(to:)
+        setIncomingURLHandler =
+            (backend as? any BackendFeatures.IncomingURLs)?.setIncomingURLHandler(to:)
     }
 
     /// Recomputes the entire UI (e.g. due to the root view's state updating).
@@ -62,11 +71,11 @@ public class ViewGraph<Root: View> {
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues
     ) -> ViewLayoutResult {
-        parentEnvironment = environment
+        parentEnvironment = environment.with(\.graphUpdateHost, graphUpdateHost)
         latestProposal = proposedSize
 
         let result = rootNode.computeLayout(
-            with: newView ?? view,
+            with: newView,
             proposedSize: proposedSize,
             environment: parentEnvironment
         )
@@ -83,7 +92,7 @@ public class ViewGraph<Root: View> {
         committedProposal = latestProposal
         self.currentRootViewResult = rootNode.commit()
         if isFirstUpdate {
-            setIncomingURLHandler { url in
+            setIncomingURLHandler? { url in
                 self.currentRootViewResult.preferences.onOpenURL?(url)
             }
             isFirstUpdate = false

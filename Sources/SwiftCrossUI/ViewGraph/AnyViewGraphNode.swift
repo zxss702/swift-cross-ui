@@ -26,6 +26,9 @@ public class AnyViewGraphNode<NodeView: View> {
         ) -> ViewLayoutResult
     /// The node's type-erased commit method.
     private var _commit: () -> ViewLayoutResult
+    private var _prepareLayoutWithNewView: (NodeView?) -> Void
+    private var _layoutIdentity: () -> ObjectIdentifier
+    private var _layoutGeneration: () -> Int
     /// The type-erased getter for the node's widget.
     private var _getWidget: () -> AnyWidget
     /// The type-erased getter for the node's view.
@@ -33,15 +36,18 @@ public class AnyViewGraphNode<NodeView: View> {
     /// The type-erased getter for the node's children.
     private var _getNodeChildren: () -> any ViewGraphNodeChildren
     /// The type-erased getter for the node's underlying erased backend.
-    private var _getBackend: () -> any AppBackend
+    private var _getBackend: () -> any BaseAppBackend
     /// The type-erased getter for the node's last proposed size.
     private var _getLastProposedSize: () -> ProposedViewSize
 
     /// Type-erases a view graph node.
-    public init<Backend: AppBackend>(_ node: ViewGraphNode<NodeView, Backend>) {
+    public init<Backend: BaseAppBackend>(_ node: ViewGraphNode<NodeView, Backend>) {
         self.node = node
         _computeLayoutWithNewView = node.computeLayout(with:proposedSize:environment:)
         _commit = node.commit
+        _prepareLayoutWithNewView = node.prepareForLayout(with:)
+        _layoutIdentity = { node.layoutIdentity }
+        _layoutGeneration = { node.layoutGeneration }
         _getWidget = {
             AnyWidget(node.widget)
         }
@@ -60,7 +66,7 @@ public class AnyViewGraphNode<NodeView: View> {
     }
 
     /// Creates a new view graph node and immediately type-erases it.
-    public convenience init<Backend: AppBackend>(
+    public convenience init<Backend: BaseAppBackend>(
         for view: NodeView,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot? = nil,
@@ -98,6 +104,18 @@ public class AnyViewGraphNode<NodeView: View> {
         _commit()
     }
 
+    func prepareLayoutWithNewView(_ newView: NodeView?) {
+        _prepareLayoutWithNewView(newView)
+    }
+
+    func layoutIdentity() -> ObjectIdentifier {
+        _layoutIdentity()
+    }
+
+    func layoutGeneration() -> Int {
+        _layoutGeneration()
+    }
+
     /// Gets the node's wrapped view.
     ///
     /// - Returns: The node's wrapped view.
@@ -115,13 +133,13 @@ public class AnyViewGraphNode<NodeView: View> {
     /// Gets the node's backend.
     ///
     /// - Returns: The node's backend.
-    public func getBackend() -> any AppBackend {
+    public func getBackend() -> any BaseAppBackend {
         _getBackend()
     }
 
     /// Converts the node back to its original type. Crashes if the requested backend doesn't
     /// match the node's original backend.
-    public func concreteNode<Backend: AppBackend>(
+    public func concreteNode<Backend: BaseAppBackend>(
         for backend: Backend.Type
     ) -> ViewGraphNode<NodeView, Backend> {
         guard let node = node as? ViewGraphNode<NodeView, Backend> else {

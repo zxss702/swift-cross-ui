@@ -16,7 +16,7 @@ public struct AnyView: TypeSafeView {
         self.child = child
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -30,7 +30,7 @@ public struct AnyView: TypeSafeView {
         )
     }
 
-    func layoutableChildren<Backend: AppBackend>(
+    func layoutableChildren<Backend: BaseAppBackend>(
         backend: Backend,
         children: AnyViewChildren
     ) -> [LayoutSystem.LayoutableChild] {
@@ -39,7 +39,7 @@ public struct AnyView: TypeSafeView {
         body.layoutableChildren(backend: backend, children: children)
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: AnyViewChildren,
         backend: Backend
     ) -> Backend.Widget {
@@ -52,13 +52,25 @@ public struct AnyView: TypeSafeView {
     /// Attempts to update the child. If the initial update fails then it means that the child's
     /// concrete type has changed and we must recreate the child node and swap out our current
     /// child widget with the new view's widget.
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: AnyViewChildren,
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
+        let childType = ObjectIdentifier(type(of: child))
+
+        if childType != children.childType {
+            children.node = ErasedViewGraphNode(
+                for: child,
+                backend: backend,
+                environment: environment
+            )
+            children.childType = childType
+            children.widgetNeedsReinsertion = true
+        }
+
         var (viewTypesMatched, result) = children.node.computeLayoutWithNewView(
             child,
             proposedSize,
@@ -88,7 +100,7 @@ public struct AnyView: TypeSafeView {
         return result
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: AnyViewChildren,
         layout: ViewLayoutResult,
@@ -96,7 +108,7 @@ public struct AnyView: TypeSafeView {
         backend: Backend
     ) {
         if children.widgetNeedsReinsertion {
-            backend.remove(childAt: 0, from: widget)
+            backend.removeAllChildren(of: widget)
             backend.insert(children.node.getWidget().into(), into: widget, at: 0)
             backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
             children.widgetNeedsReinsertion = false
@@ -105,17 +117,19 @@ public struct AnyView: TypeSafeView {
         _ = children.node.commit()
 
         backend.setSize(of: widget, to: layout.size.vector)
+        backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
     }
 }
 
 class AnyViewChildren: ViewGraphNodeChildren {
     /// The erased underlying node.
     var node: ErasedViewGraphNode
+    var childType: ObjectIdentifier
     /// Stores whether or not the displayed view changed during computeLayout.
     var widgetNeedsReinsertion = false
 
     var widgets: [AnyWidget] {
-        return [node.getWidget()]
+        [node.getWidget()]
     }
 
     var erasedNodes: [ErasedViewGraphNode] {
@@ -123,12 +137,13 @@ class AnyViewChildren: ViewGraphNodeChildren {
     }
 
     /// Creates the erased child node and wraps the child's widget in a single-child container.
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         from view: AnyView,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,
         environment: EnvironmentValues
     ) {
+        childType = ObjectIdentifier(type(of: view.child))
         node = ErasedViewGraphNode(
             for: view.child,
             backend: backend,

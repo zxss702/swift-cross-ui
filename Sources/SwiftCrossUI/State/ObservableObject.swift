@@ -1,3 +1,5 @@
+import Foundation
+
 /// An object that can be observed for changes.
 ///
 /// The default implementation only publishes changes made to properties that
@@ -65,10 +67,59 @@ public protocol ObservableObject: AnyObject {
 
 extension ObservableObject {
     public var didChange: Publisher {
-        let publisher = Publisher()
-            .tag(with: String(describing: type(of: self)))
+        observableObjectPublisherStore.publisher(for: self)
+    }
+}
 
-        var mirror: Mirror? = Mirror(reflecting: self)
+private let observableObjectPublisherStore = ObservableObjectPublisherStore()
+
+private final class ObservableObjectPublisherStore: @unchecked Sendable {
+    private final class Entry {
+        weak var owner: AnyObject?
+        let publisher: Publisher
+        var cancellables: [Cancellable]
+
+        init(
+            owner: AnyObject,
+            publisher: Publisher,
+            cancellables: [Cancellable]
+        ) {
+            self.owner = owner
+            self.publisher = publisher
+            self.cancellables = cancellables
+        }
+    }
+
+    private var entries: [ObjectIdentifier: Entry] = [:]
+    private let lock = NSLock()
+
+    func publisher(for object: any ObservableObject) -> Publisher {
+        let key = ObjectIdentifier(object)
+
+        lock.lock()
+        if let entry = entries[key], entry.owner != nil {
+            let publisher = entry.publisher
+            lock.unlock()
+            return publisher
+        }
+        lock.unlock()
+
+        let entry = makeEntry(for: object)
+
+        lock.lock()
+        entries = entries.filter { $0.value.owner != nil }
+        entries[key] = entry
+        lock.unlock()
+
+        return entry.publisher
+    }
+
+    private func makeEntry(for object: any ObservableObject) -> Entry {
+        let publisher = Publisher()
+            .tag(with: String(describing: type(of: object)))
+        var cancellables: [Cancellable] = []
+
+        var mirror: Mirror? = Mirror(reflecting: object)
         while let aClass = mirror {
             for (_, property) in aClass.children {
                 guard
@@ -78,12 +129,16 @@ extension ObservableObject {
                     continue
                 }
 
-                let cancellable = publisher.link(toUpstream: property.didChange)
-                cancellable.defuse()
+                cancellables.append(publisher.link(toUpstream: property.didChange))
             }
             mirror = aClass.superclassMirror
         }
-        return publisher
+
+        return Entry(
+            owner: object,
+            publisher: publisher,
+            cancellables: cancellables
+        )
     }
 }
 
@@ -102,9 +157,6 @@ extension Optional: OptionalObservableObject where Wrapped: ObservableObject {
     }
 }
 
-@available(*, deprecated, message: "Replace Observable with ObservableObject")
-public typealias Observable = ObservableObject
-
 /// Automatically observes all public noncomputed variables with public getter and setter
 @attached(memberAttribute)
 @attached(extension, conformances: ObservableObject)
@@ -116,6 +168,10 @@ public macro ObservableObject() =
 
 /// Apply to a member inside your `@ObservableObject` class to opt out of observation
 // This macro is just used as a flag for `@ObservableObject` to ignore a specific property
+@available(macOS, obsoleted: 14, message: "Add `import Observation`. Also consider using `@Observable` insted of `@ObservableObject`.")
+@available(iOS, obsoleted: 17, message: "Add `import Observation`. Also consider using `@Observable` insted of `@ObservableObject`.")
+@available(watchOS, obsoleted: 10, message: "Add `import Observation`. Also consider using `@Observable` insted of `@ObservableObject`.")
+@available(tvOS, obsoleted: 17, message: "Add `import Observation`. Also consider using `@Observable` insted of `@ObservableObject`.")
 @attached(accessor)
 public macro ObservationIgnored() =
     #externalMacro(

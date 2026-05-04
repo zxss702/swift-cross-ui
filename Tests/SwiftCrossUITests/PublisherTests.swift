@@ -62,6 +62,27 @@ struct PublisherTests: Sendable {
         #expect(!observedChange, "Expected mutation not to trigger cancelled observation")
     }
 
+    @Test("Default ObservableObject publishers are stable")
+    func testDefaultObservableObjectPublisherIsStable() {
+        class MyState: SwiftCrossUI.ObservableObject {
+            @SwiftCrossUI.Published
+            var count = 0
+        }
+
+        let state = MyState()
+        var observedChangeCount = 0
+        let cancellable = state.didChange.observe {
+            observedChangeCount += 1
+        }
+
+        state.count += 1
+        state.count += 1
+
+        #expect(observedChangeCount == 2)
+
+        cancellable.cancel()
+    }
+
     #if canImport(AppKitBackend)
         // TODO: Create mock backend so that this can be tested on all platforms. There's
         //   nothing AppKit-specific about it.

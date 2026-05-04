@@ -13,14 +13,14 @@ public protocol SceneGraphNode: AnyObject {
     /// Creates a node from a corresponding scene.
     ///
     /// Should perform initial setup of any widgets required to display the
-    /// scene (although ``SceneGraphNode/update(_:backend:environment:)`` is
+    /// scene (although ``SceneGraphNode/update(backend:environment:)`` is
     /// guaranteed to be called immediately after initialization).
     ///
     /// - Parameters:
     ///   - scene: The scene to create the node from.
     ///   - backend: The app's backend.
     ///   - environment: The current root-level environment.
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         from scene: NodeScene,
         backend: Backend,
         environment: EnvironmentValues
@@ -47,7 +47,7 @@ public protocol SceneGraphNode: AnyObject {
     /// - Parameters:
     ///   - backend: The app's backend.
     ///   - environment: The current environment.
-    func update<Backend: AppBackend>(
+    func update<Backend: BaseAppBackend>(
         backend: Backend,
         environment: EnvironmentValues
     )

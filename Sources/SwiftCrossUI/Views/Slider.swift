@@ -60,18 +60,18 @@ public struct Slider: ElementaryView, View {
         decimalPlaces = 2
     }
 
-    func asWidget<Backend: AppBackend>(backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(backend: Backend) -> Backend.Widget {
         return backend.createSlider()
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
-        // TODO: Don't rely on naturalSize for minimum size so that we can get
-        //   Slider sizes without relying on the widget.
+        // TODO: Don't rely on naturalSize for minimum size so that we can get Slider sizes without
+        //   relying on the widget.
         let naturalSize = backend.naturalSize(of: widget)
 
         let size = ViewSize(
@@ -83,7 +83,7 @@ public struct Slider: ElementaryView, View {
         return ViewLayoutResult.leafView(size: size)
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
@@ -106,5 +106,18 @@ public struct Slider: ElementaryView, View {
         }
 
         backend.setSize(of: widget, to: layout.size.vector)
+    }
+}
+
+extension Slider: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(
+            Self.self,
+            values: [
+                AnyHashable(range.lowerBound),
+                AnyHashable(range.upperBound),
+                AnyHashable(decimalPlaces),
+            ]
+        )
     }
 }

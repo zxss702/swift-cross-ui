@@ -94,7 +94,7 @@ public class Publisher {
     /// If the provided backend has the notion of a main thread, then the update
     /// handler will end up on that thread, but regardless of backend it's
     /// guaranteed that updates will always run serially.
-    func observeAsUIUpdater<Backend: AppBackend>(
+    func observeAsUIUpdater<Backend: BaseAppBackend>(
         backend: Backend,
         action: @escaping @MainActor @Sendable () -> Void
     ) -> Cancellable {
@@ -102,6 +102,8 @@ public class Publisher {
         let serialUpdateHandlingQueue = self.serialUpdateHandlingQueue
         let updateStatistics = self.updateStatistics
         return observe {
+            let transaction = StateMutationContext.currentTransaction
+                .overlaid(by: TransactionContext.current)
             // Only allow one update to wait at a time.
             guard semaphore.wait(timeout: .now()) == .success else {
                 // It's a bit of a hack but we just reuse the serial update handling queue
@@ -114,11 +116,7 @@ public class Publisher {
                 return
             }
 
-            // Add update to queue. We use our own serial update handling queue since some
-            // backends don't have the concept of a main thread, leading to the possibility
-            // that two updates can run at once which would be inefficient and lead to
-            // incorrect results anyway.
-            serialUpdateHandlingQueue.async {
+            let runUpdate: @Sendable () -> Void = {
                 backend.runInMainThread {
                     // Now that we're about to start, let another update queue up. If we
                     // instead waited until we're finished the update, we'd introduce the
@@ -129,7 +127,11 @@ public class Publisher {
                     // Run the closure and while we're at it measure how long it takes
                     // so that we can use it when throttling if updates start backing up.
                     let start = ProcessInfo.processInfo.systemUptime
-                    action()
+                    withTransaction(transaction) {
+                        StateMutationContext.withTransaction(transaction) {
+                            action()
+                        }
+                    }
                     let elapsed = ProcessInfo.processInfo.systemUptime - start
 
                     // I chose exponential smoothing because it's simple to compute, doesn't
@@ -139,21 +141,27 @@ public class Publisher {
                     updateStatistics.exponentiallySmoothedUpdateLength =
                         elapsed / 2 + updateStatistics.exponentiallySmoothedUpdateLength / 2
                 }
+            }
 
-                if ProcessInfo.processInfo.systemUptime - updateStatistics.lastUpdateMergeTime < 1 {
-                    // The factor of 1.5 was determined empirically. This algorithm is
-                    // open for improvements since it's purely here to reduce the risk
-                    // of UI freezes. A factor of 1.5 equates to a gap between updates of
-                    // approximately 50% of the average update length.
-                    let throttlingDelay = updateStatistics.exponentiallySmoothedUpdateLength * 1.5
-
-                    // Sleeping on a dispatch queue generally isn't a good idea because
-                    // you prevent the queue from servicing any other work, but in this
-                    // case that's the whole point. The goal is to give the main thread
-                    // a break, which we do by blocking this queue and in effect guarding
-                    // the main thread from subsequent updates until we wake up again.
-                    Thread.sleep(forTimeInterval: throttlingDelay)
+            // Run the first update without an extra dispatch hop. The private
+            // queue is only used when updates are already merging and we need to
+            // throttle to avoid starving slower backends.
+            if ProcessInfo.processInfo.systemUptime - updateStatistics.lastUpdateMergeTime < 1 {
+                serialUpdateHandlingQueue.async {
+                    runUpdate()
+                    if ProcessInfo.processInfo.systemUptime
+                        - updateStatistics.lastUpdateMergeTime < 1
+                    {
+                        // The factor of 1.5 was determined empirically. This
+                        // algorithm is open for improvements since it's purely
+                        // here to reduce the risk of UI freezes.
+                        let throttlingDelay =
+                            updateStatistics.exponentiallySmoothedUpdateLength * 1.5
+                        Thread.sleep(forTimeInterval: throttlingDelay)
+                    }
                 }
+            } else {
+                runUpdate()
             }
         }
     }

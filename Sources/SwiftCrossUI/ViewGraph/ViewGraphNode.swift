@@ -1,4 +1,6 @@
+import Dispatch
 import Foundation
+import PerceptionCore
 
 /// A view graph node storing a view, its widget, and its children (likely a
 /// collection of more nodes).
@@ -6,7 +8,13 @@ import Foundation
 /// This is where updates are initiated when a view's state updates, and where state is persisted
 /// even when a view gets recomputed by its parent.
 @MainActor
-public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
+public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ViewModelObserver, Sendable {
+    private struct CurrentLayoutCacheKey: Equatable {
+        var proposedSize: ProposedViewSize
+        var environment: AnyHashable
+        var layoutGeneration: Int
+    }
+
     /// The view's single widget for the entirety of its lifetime in the view graph.
     ///
     public var widget: Backend.Widget {
@@ -43,6 +51,9 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
     /// A cache of update results keyed by the proposed size they were for. Gets
     /// cleared before the results' sizes become invalid.
     var resultCache: [ProposedViewSize: ViewLayoutResult]
+    private var currentLayoutCacheKey: CurrentLayoutCacheKey?
+    private(set) var layoutGeneration = 0
+    private var layoutInputKey: AnyHashable?
     /// The most recent size proposed by the parent view. Used when updating the wrapped
     /// view as a result of a state change rather than the parent view updating. Proposals
     /// that get cached responses don't update this size, as this size should stay in sync
@@ -59,6 +70,9 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
 
     /// The dynamic property updater for this view.
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
+
+    /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
+    var currentViewModelObservationID: UUID?
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -80,6 +94,7 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
             ? snapshot?.children : snapshot.map { [$0] }
 
         currentLayout = nil
+        currentLayoutCacheKey = nil
         resultCache = [:]
         lastProposedSize = .zero
         parentEnvironment = environment
@@ -91,13 +106,17 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
         let viewEnvironment = updateEnvironment(environment)
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: nil)
+        layoutInputKey = Self.layoutInputKey(for: view)
 
-        let children = view.children(
-            backend: backend,
-            snapshots: childSnapshots,
-            environment: viewEnvironment
-        )
-        self.children = children
+        self.children = GraphUpdateContext.withUpdating {
+            self.observe(in: backend) {
+                view.children(
+                    backend: backend,
+                    snapshots: childSnapshots,
+                    environment: viewEnvironment
+                )
+            }
+        }
 
         // Then create the widget for the view itself
         let widget = view.asWidget(
@@ -126,12 +145,53 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
             }
 
             cancellables.append(
-                value.didChange
-                    .observeAsUIUpdater(backend: backend) { [weak self] in
-                        guard let self else { return }
+                value.didChange.observe { [weak self] in
+                    let transaction = StateMutationContext.currentTransaction
+                        .overlaid(by: TransactionContext.current)
+                    self?.enqueueBottomUpUpdate(transaction: transaction)
+                }
+            )
+        }
+    }
+
+    var layoutIdentity: ObjectIdentifier {
+        ObjectIdentifier(self)
+    }
+
+    func viewModelDidChange<B: BaseAppBackend>(backend: B) {
+        let transaction = StateMutationContext.currentTransaction
+            .overlaid(by: TransactionContext.current)
+        enqueueBottomUpUpdate(transaction: transaction)
+    }
+
+    func enqueueObservedChange<B: BaseAppBackend>(
+        backend: B,
+        transaction: Transaction
+    ) {
+        enqueueBottomUpUpdate(transaction: transaction)
+    }
+
+    private func enqueueBottomUpUpdate(transaction: Transaction) {
+        let updateKey = AnyHashable(ObjectIdentifier(self))
+
+        guard let graphUpdateHost = parentEnvironment.graphUpdateHost else {
+            backend.runInMainThread { [weak self] in
+                guard let self else { return }
+                withTransaction(transaction) {
+                    StateMutationContext.withTransaction(transaction) {
                         self.bottomUpUpdate()
                     }
-            )
+                }
+            }
+            return
+        }
+
+        graphUpdateHost.enqueue(
+            backend: backend,
+            transaction: transaction,
+            key: updateKey
+        ) { [weak self] in
+            self?.bottomUpUpdate()
         }
     }
 
@@ -141,26 +201,94 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
     private func bottomUpUpdate() {
         // First we compute what size the view will be after the update. If it will change size,
         // propagate the update to this node's parent instead of updating straight away.
+        let baseEnvironment = parentEnvironment.withoutCurrentTransaction()
+        let transactionEnvironment = baseEnvironment.withCurrentTransaction(
+            StateMutationContext.currentTransaction
+        )
         let currentSize = currentLayout?.size
         let newLayout = self.computeLayout(
             proposedSize: lastProposedSize,
-            environment: parentEnvironment
+            environment: transactionEnvironment
         )
 
         self.currentLayout = newLayout
         if newLayout.size != currentSize {
             resultCache[lastProposedSize] = newLayout
-            parentEnvironment.onResize(newLayout.size)
+            let onResize = parentEnvironment.onResize
+            parentEnvironment = baseEnvironment
+            onResize(newLayout.size)
         } else {
             _ = self.commit()
+            parentEnvironment = baseEnvironment
         }
     }
 
     private func updateEnvironment(_ environment: EnvironmentValues) -> EnvironmentValues {
-        environment.with(\.onResize) { [weak self] _ in
-            guard let self else { return }
-            self.bottomUpUpdate()
+        environment
+            .with(\.onResize) { [weak self] _ in
+                guard let self else { return }
+                self.enqueueBottomUpUpdate(
+                    transaction: StateMutationContext.currentTransaction
+                        .overlaid(by: TransactionContext.current)
+                )
+            }
+            .with(\.requestRenderFrame) { [weak self] transaction in
+                guard let self else { return }
+                self.requestRenderFrame(transaction: transaction)
+            }
+    }
+
+    private func requestRenderFrame(transaction: Transaction) {
+        guard let graphUpdateHost = parentEnvironment.graphUpdateHost else {
+            backend.runInMainThread { [weak self] in
+                self?.performRenderFrame(transaction: transaction)
+            }
+            return
         }
+
+        graphUpdateHost.enqueueRenderFrame(
+            backend: backend,
+            transaction: transaction,
+            key: AnyHashable(ObjectIdentifier(self))
+        ) { [weak self] in
+            self?.performRenderFrame(transaction: transaction)
+        }
+    }
+
+    private func performRenderFrame(transaction: Transaction) {
+        parentEnvironment = parentEnvironment
+            .with(\.allowLayoutCaching, false)
+            .withCurrentTransaction(transaction)
+        _ = commit()
+        parentEnvironment = parentEnvironment.withoutCurrentTransaction()
+    }
+
+    func prepareForLayout(with newView: NodeView?) {
+        guard let newView else {
+            return
+        }
+
+        let newKey = Self.layoutInputKey(for: newView)
+        if let newKey {
+            guard newKey != layoutInputKey else {
+                return
+            }
+            layoutInputKey = newKey
+            invalidateLayoutCache()
+        } else if layoutInputKey != nil {
+            layoutInputKey = nil
+            invalidateLayoutCache()
+        }
+    }
+
+    private func invalidateLayoutCache() {
+        resultCache = [:]
+        currentLayoutCacheKey = nil
+        layoutGeneration &+= 1
+    }
+
+    private static func layoutInputKey(for view: NodeView) -> AnyHashable? {
+        LayoutInputKeys.key(for: view)
     }
 
     /// Recomputes the view's body and computes its layout and the layout of
@@ -197,7 +325,32 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
             hasHadFirstUpdate = true
         }
 
-        if proposedSize == lastProposedSize && !resultCache.isEmpty
+        let previousView: NodeView?
+        if let newView {
+            previousView = view
+            view = newView
+        } else {
+            previousView = nil
+        }
+
+        let viewEnvironment = updateEnvironment(environment)
+        dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
+        prepareForLayout(with: newView)
+        let currentCacheKey = CurrentLayoutCacheKey(
+            proposedSize: proposedSize,
+            environment: environment.layoutInputFingerprint,
+            layoutGeneration: layoutGeneration
+        )
+
+        if !environment.allowLayoutCaching,
+            canReuseCommittedCurrentLayout,
+            currentLayoutCacheKey == currentCacheKey,
+            let currentLayout
+        {
+            parentEnvironment = environment
+            lastProposedSize = proposedSize
+            return currentLayout
+        } else if proposedSize == lastProposedSize && !resultCache.isEmpty
             && (!parentEnvironment.allowLayoutCaching || environment.allowLayoutCaching),
             let currentLayout
         {
@@ -218,34 +371,28 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
         parentEnvironment = environment
         lastProposedSize = proposedSize
 
-        let previousView: NodeView?
-        if let newView {
-            previousView = view
-            view = newView
-        } else {
-            previousView = nil
-        }
-
-        let viewEnvironment = updateEnvironment(environment)
-
-        dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
-
-        let result = view.computeLayout(
-            widget,
-            children: children,
-            proposedSize: proposedSize,
-            environment: viewEnvironment,
-            backend: backend
-        )
-
         // We assume that the view's sizing behaviour won't change between consecutive
         // layout computations and the following commit, because groups of updates
         // following that pattern are assumed to be occurring within a single overarching
         // view update. Under that assumption, we can cache view layout results.
+        let result = GraphUpdateContext.withUpdating {
+            view.computeLayout(
+                widget,
+                children: children,
+                proposedSize: proposedSize,
+                environment: viewEnvironment,
+                backend: backend
+            )
+        }
         resultCache[proposedSize] = result
 
         currentLayout = result
+        currentLayoutCacheKey = environment.allowLayoutCaching ? nil : currentCacheKey
         return result
+    }
+
+    private var canReuseCommittedCurrentLayout: Bool {
+        layoutInputKey != nil && view is any ElementaryView
     }
 
     /// Commits the view's most recently computed layout and any view state changes
@@ -255,12 +402,20 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
     /// - Returns: The most recently computed layout. Guaranteed to match the
     ///   result of the last call to ``computeLayout(with:proposedSize:environment:)``.
     public func commit() -> ViewLayoutResult {
+        if parentEnvironment.allowLayoutCaching && !RenderFrameContext.isRendering {
+            let finalEnvironment = parentEnvironment.with(\.allowLayoutCaching, false)
+            _ = computeLayout(
+                proposedSize: lastProposedSize,
+                environment: finalEnvironment
+            )
+        }
+
         guard let currentLayout else {
             logger.warning("layout committed before being computed, ignoring")
             return .leafView(size: .zero)
         }
 
-        if parentEnvironment.allowLayoutCaching {
+        if parentEnvironment.allowLayoutCaching && !RenderFrameContext.isRendering {
             logger.warning(
                 "committing layout computed with caching enabled; results may be invalid",
                 metadata: ["NodeView": "\(NodeView.self)"]
@@ -281,9 +436,10 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: Sendable {
             widget,
             children: children,
             layout: currentLayout,
-            environment: parentEnvironment,
+            environment: updateEnvironment(parentEnvironment),
             backend: backend
         )
+        parentEnvironment = parentEnvironment.withoutCurrentTransaction()
         resultCache = [:]
 
         backend.showUpdate(of: widget)

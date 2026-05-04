@@ -1,10 +1,13 @@
+import Foundation
+import PerceptionCore
+
 // TODO: This could possibly be renamed to ``SceneGraph`` now that that's basically the role
 //   it has taken on since introducing scenes.
 /// A top-level wrapper providing an entry point for the app. Exists to be able to persist
 /// the view graph alongside the app (we can't do that on a user's ``App`` implementation because
 /// we can only add computed properties).
 @MainActor
-class _App<AppRoot: App> {
+class _App<AppRoot: App>: ViewModelObserver {
     /// The app being run.
     let app: AppRoot
     /// An instance of the app's selected backend.
@@ -15,14 +18,19 @@ class _App<AppRoot: App> {
     var cancellables: [Cancellable]
     /// The root level environment.
     var environment: EnvironmentValues
+    let graphUpdateHost = GraphUpdateHost()
     /// The dynamic property updater for ``app``.
     var dynamicPropertyUpdater: DynamicPropertyUpdater<AppRoot>
+
+    /// Used by the `ViewModelObserver` protocol to prevent duplicate view updates.
+    var currentViewModelObservationID: UUID?
 
     /// Wraps a user's app implementation.
     init(_ app: AppRoot) {
         backend = app.backend
         self.app = app
         self.environment = EnvironmentValues(backend: backend)
+            .with(\.graphUpdateHost, graphUpdateHost)
         self.cancellables = []
 
         dynamicPropertyUpdater = DynamicPropertyUpdater(for: app)
@@ -35,11 +43,14 @@ class _App<AppRoot: App> {
         dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
         if let sceneGraphRoot {
-            let result = sceneGraphRoot.updateNode(app.body, environment: environment)
-            backend.setApplicationMenu(
-                result.preferences.commands.resolve(),
-                environment: environment
-            )
+            let body = self.observe(in: backend) { app.body }
+            let result = sceneGraphRoot.updateNode(body, environment: environment)
+            if let backend = backend as? any BackendFeatures.ApplicationMenus {
+                backend.setApplicationMenu(
+                    result.preferences.commands.resolve(),
+                    environment: environment
+                )
+            }
             sceneGraphRoot.update(
                 backend: backend,
                 environment: environment
@@ -47,13 +58,42 @@ class _App<AppRoot: App> {
         }
     }
 
+    func viewModelDidChange<Backend: BaseAppBackend>(backend: Backend) {
+        enqueueRefreshSceneGraph(
+            backend: backend,
+            transaction: StateMutationContext.currentTransaction
+                .overlaid(by: TransactionContext.current)
+        )
+    }
+
+    func enqueueObservedChange<Backend: BaseAppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    ) {
+        enqueueRefreshSceneGraph(backend: backend, transaction: transaction)
+    }
+
+    private func enqueueRefreshSceneGraph<Backend: BaseAppBackend>(
+        backend: Backend,
+        transaction: Transaction
+    ) {
+        graphUpdateHost.enqueue(
+            backend: backend,
+            transaction: transaction,
+            key: "app-root"
+        ) { [weak self] in
+            self?.refreshSceneGraph()
+        }
+    }
+
     /// Runs the app using the app's selected backend.
     func run() {
         backend.runMainLoop { [self] in
             let baseEnvironment = EnvironmentValues(backend: backend)
+                .with(\.graphUpdateHost, graphUpdateHost)
             environment = backend.computeRootEnvironment(
                 defaultEnvironment: baseEnvironment
-            )
+            ).with(\.graphUpdateHost, graphUpdateHost)
 
             dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
@@ -73,15 +113,23 @@ class _App<AppRoot: App> {
                     continue
                 }
 
-                let cancellable =
-                    value.didChange.observeAsUIUpdater(backend: backend) { [weak self] in
-                        self?.refreshSceneGraph()
+                let cancellable = value.didChange.observe { [weak self] in
+                    guard let self else {
+                        return
                     }
+                    let transaction = StateMutationContext.currentTransaction
+                        .overlaid(by: TransactionContext.current)
+                    self.enqueueRefreshSceneGraph(
+                        backend: self.backend,
+                        transaction: transaction
+                    )
+                }
                 cancellables.append(cancellable)
             }
 
+            let body = self.observe(in: backend) { app.body }
             let rootNode = AppRoot.Body.Node(
-                from: app.body,
+                from: body,
                 backend: backend,
                 environment: environment
             )
@@ -89,17 +137,22 @@ class _App<AppRoot: App> {
             backend.setRootEnvironmentChangeHandler {
                 self.environment = self.backend.computeRootEnvironment(
                     defaultEnvironment: baseEnvironment
+                ).with(\.graphUpdateHost, self.graphUpdateHost)
+                self.enqueueRefreshSceneGraph(
+                    backend: self.backend,
+                    transaction: TransactionContext.current
                 )
-                self.refreshSceneGraph()
             }
 
             let result = rootNode.updateNode(nil, environment: environment)
 
             // Update application-wide menu
-            backend.setApplicationMenu(
-                result.preferences.commands.resolve(),
-                environment: environment
-            )
+            if let backend = backend as? any BackendFeatures.ApplicationMenus {
+                backend.setApplicationMenu(
+                    result.preferences.commands.resolve(),
+                    environment: environment
+                )
+            }
 
             rootNode.update(backend: backend, environment: environment)
             self.sceneGraphRoot = rootNode

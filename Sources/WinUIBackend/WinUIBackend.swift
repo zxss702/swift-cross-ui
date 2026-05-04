@@ -1,4 +1,5 @@
 import CWinRT
+import Dispatch
 import Foundation
 import SwiftCrossUI
 import UWP
@@ -6,7 +7,8 @@ import WinAppSDK
 import WinSDK
 import WinUI
 import WinUIInterop
-import WindowsFoundation
+@preconcurrency import WindowsFoundation
+import Mutex
 
 // Many force tries are required for the WinUI backend but we don't really want them
 // anywhere else so just disable the lint rule at a file level.
@@ -20,16 +22,36 @@ extension App {
     }
 }
 
-class WinUIApplication: SwiftApplication {
-    nonisolated(unsafe)
-    static var callback: ((WinUIApplication) -> Void)?
+class WinUIApplication: SwiftApplication, @unchecked Sendable {
+    static let callback = Mutex<(@MainActor (WinUIApplication) -> Void)?>(nil)
 
     override func onLaunched(_ args: WinUI.LaunchActivatedEventArgs) {
-        Self.callback?(self)
+        Self.callback.withLock { callback in
+            // We can't explicitly hop to the main actor because we haven't set up
+            // our WinUI MainActor fix yet.
+            MainActor.assumeIsolated {
+                callback?(self)
+            }
+        }
     }
 }
 
-public final class WinUIBackend: AppBackend {
+public final class WinUIBackend:
+    BaseAppBackend,
+    BackendFeatures.ApplicationMenus,
+    BackendFeatures.ExternalURLs,
+    BackendFeatures.IncomingURLs,
+    BackendFeatures.FileDialogs,
+    BackendFeatures.Alerts,
+    BackendFeatures.CornerRadius,
+    BackendFeatures.Gestures,
+    BackendFeatures.AttachedMenus,
+    BackendFeatures.Paths,
+    BackendFeatures.Tooltips,
+    BackendFeatures.Colors,
+    BackendFeatures.DatePickers,
+    BackendFeatures.Windowing
+{
     // Logging
     private struct LogLocation: Hashable, Equatable {
         let file: String
@@ -58,15 +80,12 @@ public final class WinUIBackend: AppBackend {
     public typealias Menu = WinUI.MenuFlyout
     public typealias Alert = WinUI.ContentDialog
     public typealias Path = GeometryGroupHolder
-    public typealias Sheet = CustomWindow // Only for protocol conformance. WinUI doesn't currently support it.
 
     public let defaultTableRowContentHeight = 20
     public let defaultTableCellVerticalPadding = 4
     public let defaultPaddingAmount = 10
     public let requiresToggleSwitchSpacer = false
     public let requiresImageUpdateOnScaleFactorChange = false
-    public let menuImplementationStyle = MenuImplementationStyle.menuButton
-    public let canRevealFiles = false
     public let supportsMultipleWindows = true
     public let deviceClass = DeviceClass.desktop
     public let supportedDatePickerStyles: [DatePickerStyle] = [
@@ -87,10 +106,26 @@ public final class WinUIBackend: AppBackend {
         var textFieldChangeActions: [ObjectIdentifier: (String) -> Void] = [:]
         var textFieldSubmitActions: [ObjectIdentifier: () -> Void] = [:]
     }
-    private var rootEnvironmentChangeHandler: (() -> Void)?
+    private var rootEnvironmentChangeHandler: (@Sendable @MainActor () -> Void)?
+
+    private final class ElementState {
+        var size: SIMD2<Int>?
+        var position: SIMD2<Int>?
+        var opacity: Double?
+        var affineTransform: SwiftCrossUI.AffineTransform?
+        var renderTransform: MatrixTransform?
+        var blurRadius: Double?
+        var blurApplied = false
+        var pendingBlurInstall: EventCleanup?
+
+        deinit {
+            pendingBlurInstall?.dispose()
+        }
+    }
 
     var internalState: InternalState
     nonisolated(unsafe) private var dispatcherQueue: WinAppSDK.DispatcherQueue?
+    private var elementStates: [ObjectIdentifier: ElementState] = [:]
     /// WinUI only allows one dialog at a time (subsequent dialogs throw
     /// exceptions), so we limit ourselves.
     private var dialogSemaphore = DispatchSemaphore(value: 1)
@@ -101,6 +136,91 @@ public final class WinUIBackend: AppBackend {
 
     public init() {
         internalState = InternalState()
+    }
+
+    private func state(for element: WinUI.FrameworkElement) -> ElementState {
+        let id = ObjectIdentifier(element)
+        if let state = elementStates[id] {
+            return state
+        }
+        let state = ElementState()
+        elementStates[id] = state
+        return state
+    }
+
+    private func clearState(for element: WinUI.FrameworkElement) {
+        scui_clear_element_blur(rawPointer(for: element))
+        elementStates.removeValue(forKey: ObjectIdentifier(element))
+        if let container = element as? Canvas {
+            for index in 0..<Int(container.children.size) {
+                guard let child = container.children.getAt(UInt32(index))
+                    as? WinUI.FrameworkElement
+                else {
+                    continue
+                }
+                clearState(for: child)
+            }
+        }
+    }
+
+    private func rawPointer(for element: WinUI.FrameworkElement) -> UnsafeMutableRawPointer {
+        UnsafeMutableRawPointer(element.thisPtr.pUnk.borrow)
+    }
+
+    private func blurSource(for widget: Widget) -> WinUI.FrameworkElement {
+        guard
+            let container = widget as? Canvas,
+            container.children.size == 1,
+            let child = container.children.getAt(0) as? WinUI.FrameworkElement
+        else {
+            return widget
+        }
+        return child
+    }
+
+    private func cancelPendingBlurInstall(_ state: ElementState) {
+        state.pendingBlurInstall?.dispose()
+        state.pendingBlurInstall = nil
+    }
+
+    private func installBlurAfterLayout(for widget: Widget, radius: Double, state: ElementState) {
+        guard state.pendingBlurInstall == nil else {
+            return
+        }
+        state.pendingBlurInstall = widget.layoutUpdated.addHandler { [weak self, weak widget] _, _ in
+            guard let self, let widget else {
+                return
+            }
+            guard let state = self.elementStates[ObjectIdentifier(widget)] else {
+                return
+            }
+            guard state.blurRadius == radius, !state.blurApplied else {
+                self.cancelPendingBlurInstall(state)
+                return
+            }
+            self.setBlur(of: widget, radius: radius)
+        }
+    }
+
+    private func applyBlur(of widget: Widget, radius: Double, state: ElementState) {
+        let size = state.size ?? .zero
+        guard size.x > 0 && size.y > 0 else {
+            state.blurApplied = false
+            return
+        }
+
+        state.blurApplied = scui_set_element_blur(
+            rawPointer(for: widget),
+            rawPointer(for: blurSource(for: widget)),
+            radius,
+            Double(size.x),
+            Double(size.y)
+        )
+        if state.blurApplied {
+            cancelPendingBlurInstall(state)
+        } else {
+            installBlurAfterLayout(for: widget, radius: radius, state: state)
+        }
     }
 
     struct Error: LocalizedError {
@@ -129,30 +249,34 @@ public final class WinUIBackend: AppBackend {
         // Ensure that the app's windows adapt to DPI changes at runtime
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
 
-        WinUIApplication.callback = { application in
-            // Toggle Switch has annoying default 'internal margins' (not Control
-            // margins that we can set directly) that we can luckily get rid of by
-            // overriding the relevant resource values.
-            _ = application.resources.insert("ToggleSwitchPreContentMargin", 0.0 as Double)
-            _ = application.resources.insert("ToggleSwitchPostContentMargin", 0.0 as Double)
+        WinUIApplication.callback.withLock { launchCallback in
+            launchCallback = { application in
+                // Toggle Switch has annoying default 'internal margins' (not Control
+                // margins that we can set directly) that we can luckily get rid of by
+                // overriding the relevant resource values.
+                _ = application.resources.insert("ToggleSwitchPreContentMargin", 0.0 as Double)
+                _ = application.resources.insert("ToggleSwitchPostContentMargin", 0.0 as Double)
 
-            // Handle theme changes
-            UWP.UISettings().colorValuesChanged.addHandler { _, _ in
-                self.rootEnvironmentChangeHandler?()
+                // Handle theme changes
+                UWP.UISettings().colorValuesChanged.addHandler { _, _ in
+                    Task { @MainActor in
+                        self.rootEnvironmentChangeHandler?()
+                    }
+                }
+
+                // TODO: Read in previously hardcoded values from the application's
+                // resources dictionary for future-proofing. Example code for getting
+                // property values;
+                //   let iinspectable =
+                //       application.resources.lookup("ToggleSwitchPreContentMargin")!
+                //       as! WindowsFoundation.IInspectable
+                //   let pv: __ABI_Windows_Foundation.IPropertyValue = try! iinspectable.QueryInterface()
+                //   let value = try! pv.GetDoubleImpl()
+
+                self.measurementTextBlock = (self.createTextView() as! TextBlock)
+
+                callback()
             }
-
-            // TODO: Read in previously hardcoded values from the application's
-            // resources dictionary for future-proofing. Example code for getting
-            // property values;
-            //   let iinspectable =
-            //       application.resources.lookup("ToggleSwitchPreContentMargin")!
-            //       as! WindowsFoundation.IInspectable
-            //   let pv: __ABI_Windows_Foundation.IPropertyValue = try! iinspectable.QueryInterface()
-            //   let value = try! pv.GetDoubleImpl()
-
-            self.measurementTextBlock = (self.createTextView() as! TextBlock)
-
-            callback()
         }
         WinUIApplication.main()
     }
@@ -293,7 +417,9 @@ public final class WinUIBackend: AppBackend {
         window.setChild(widget)
         try! widget.updateLayout()
         widget.actualThemeChanged.addHandler { _, _ in
-            self.rootEnvironmentChangeHandler?()
+            Task { @MainActor in
+                self.rootEnvironmentChangeHandler?()
+            }
         }
     }
 
@@ -322,9 +448,30 @@ public final class WinUIBackend: AppBackend {
         _ = UWP.Launcher.launchUriAsync(WindowsFoundation.Uri(url.absoluteString))
     }
 
-    public func runInMainThread(action: @escaping @MainActor () -> Void) {
-        _ = try! dispatcherQueue!.tryEnqueue(.normal) {
+    public nonisolated func runInMainThread(action: @escaping @MainActor () -> Void) {
+        guard let dispatcherQueue else {
+            DispatchQueue.main.async {
+                action()
+            }
+            return
+        }
+
+        let enqueued = (try? dispatcherQueue.tryEnqueue(.normal) {
             MainActor.assumeIsolated(action)
+        }) ?? false
+        if !enqueued {
+            DispatchQueue.main.async {
+                action()
+            }
+        }
+    }
+
+    public nonisolated var preferredFramesPerSecond: Double {
+        MainActor.assumeIsolated {
+            guard let hwnd = windows.first?.getHWND() else {
+                return scui_get_primary_refresh_rate()
+            }
+            return scui_get_refresh_rate_for_window(hwnd)
         }
     }
 
@@ -411,7 +558,9 @@ public final class WinUIBackend: AppBackend {
             .with(\.appPhase, windows.contains(where: \.isActive) ? .active : .inactive)
     }
 
-    public func setRootEnvironmentChangeHandler(to action: @escaping () -> Void) {
+    public func setRootEnvironmentChangeHandler(
+        to action: @escaping @Sendable @MainActor () -> Void
+    ) {
         self.rootEnvironmentChangeHandler = action
     }
 
@@ -427,7 +576,7 @@ public final class WinUIBackend: AppBackend {
 
     public func setWindowEnvironmentChangeHandler(
         of window: Window,
-        to action: @escaping () -> Void
+        to action: @escaping @Sendable @MainActor () -> Void
     ) {
         // TODO: Notify when window scale factor changes
 
@@ -454,11 +603,20 @@ public final class WinUIBackend: AppBackend {
 
     public func removeAllChildren(of container: Widget) {
         let container = container as! Canvas
+        for index in 0..<Int(container.children.size) {
+            guard let child = container.children.getAt(UInt32(index))
+                as? WinUI.FrameworkElement
+            else {
+                continue
+            }
+            clearState(for: child)
+        }
         container.children.clear()
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         let container = container as! Canvas
+        let index = min(max(index, 0), Int(container.children.size))
         container.children.insertAt(UInt32(index), child)
     }
 
@@ -466,6 +624,11 @@ public final class WinUIBackend: AppBackend {
         // TODO: Find out if there's an efficient way to do this without WinUI
         //   getting annoyed at us for having the same element in the list twice.
         let container = container as! Canvas
+        let count = Int(container.children.size)
+        guard (0..<count).contains(firstIndex), (0..<count).contains(secondIndex) else {
+            logger.warning("attempted to swap container child out of bounds")
+            return
+        }
         let largerIndex = UInt32(max(firstIndex, secondIndex))
         let smallerIndex = UInt32(min(firstIndex, secondIndex))
         let element1 = container.children[Int(smallerIndex)]
@@ -478,18 +641,100 @@ public final class WinUIBackend: AppBackend {
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! Canvas
+        guard (0..<Int(container.children.size)).contains(index) else {
+            logger.warning("attempted to remove non-existent container child")
+            return
+        }
+        if let child = container.children.getAt(UInt32(index)) as? WinUI.FrameworkElement {
+            clearState(for: child)
+        }
         container.children.removeAt(UInt32(index))
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
         let container = container as! Canvas
+        guard (0..<Int(container.children.size)).contains(index) else {
+            logger.warning("attempted to set position of non-existent container child")
+            return
+        }
         guard let child = container.children.getAt(UInt32(index)) else {
             logger.warning("child to set position of not found")
             return
         }
+        let childElement = child as? WinUI.FrameworkElement
+        guard let childElement else {
+            Canvas.setTop(child, Double(position.y))
+            Canvas.setLeft(child, Double(position.x))
+            return
+        }
 
+        let state = state(for: childElement)
+        guard state.position != position else {
+            return
+        }
+
+        state.position = position
         Canvas.setTop(child, Double(position.y))
         Canvas.setLeft(child, Double(position.x))
+    }
+
+    public func setOpacity(of widget: Widget, to opacity: Double) {
+        let opacity = min(max(opacity, 0), 1)
+        let state = state(for: widget)
+        guard state.opacity != opacity else {
+            return
+        }
+        state.opacity = opacity
+        widget.opacity = opacity
+    }
+
+    public func setTransform(of widget: Widget, to transform: SwiftCrossUI.AffineTransform) {
+        let state = state(for: widget)
+        guard state.affineTransform != transform else {
+            return
+        }
+        let matrixTransform = state.renderTransform ?? MatrixTransform()
+        matrixTransform.matrix = Matrix(
+            m11: transform.linearTransform.x,
+            m12: transform.linearTransform.z,
+            m21: transform.linearTransform.y,
+            m22: transform.linearTransform.w,
+            offsetX: transform.translation.x,
+            offsetY: transform.translation.y
+        )
+        if state.renderTransform == nil {
+            state.renderTransform = matrixTransform
+            widget.renderTransform = matrixTransform
+        }
+        state.affineTransform = transform
+    }
+
+    public func setBlur(of widget: Widget, radius: Double) {
+        let radius = max(radius, 0)
+        let state = state(for: widget)
+        guard state.blurRadius != radius || !state.blurApplied else {
+            return
+        }
+        if state.blurRadius != radius {
+            cancelPendingBlurInstall(state)
+        }
+        state.blurRadius = radius
+        guard radius > 0 else {
+            scui_clear_element_blur(rawPointer(for: widget))
+            state.blurApplied = false
+            cancelPendingBlurInstall(state)
+            return
+        }
+
+        applyBlur(of: widget, radius: radius, state: state)
+    }
+
+    public func setVisibility(of widget: Widget, visible: Bool) {
+        widget.visibility = visible ? .visible : .collapsed
+    }
+
+    public func setZIndex(of widget: Widget, to zIndex: Double) {
+        Canvas.setZIndex(widget, Int32(zIndex.rounded()))
     }
 
     public func createColorableRectangle() -> Widget {
@@ -510,6 +755,7 @@ public final class WinUIBackend: AppBackend {
         let visual: WinAppSDK.Visual = try! widget.getVisualInternal()
 
         let geometry = try! visual.compositor.createRoundedRectangleGeometry()!
+        let radius = max(radius, 0)
         geometry.cornerRadius = WindowsFoundation.Vector2(
             x: Float(radius),
             y: Float(radius)
@@ -517,9 +763,11 @@ public final class WinUIBackend: AppBackend {
 
         // We assume that SwiftCrossUI has explicitly set the size of the
         // underlying widget.
+        let width = widget.width.isFinite ? max(widget.width, 0) : 0
+        let height = widget.height.isFinite ? max(widget.height, 0) : 0
         geometry.size = WindowsFoundation.Vector2(
-            x: Float(widget.width),
-            y: Float(widget.height)
+            x: Float(width),
+            y: Float(height)
         )
 
         let clip = try! visual.compositor.createGeometricClip()!
@@ -696,8 +944,23 @@ public final class WinUIBackend: AppBackend {
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
+        let state = state(for: widget)
+        let size = SIMD2(max(size.x, 0), max(size.y, 0))
+        guard state.size != size else {
+            return
+        }
+        state.size = size
         widget.width = Double(size.x)
         widget.height = Double(size.y)
+        if let blurRadius = state.blurRadius, blurRadius > 0 {
+            guard size.x > 0 && size.y > 0 else {
+                scui_clear_element_blur(rawPointer(for: widget))
+                state.blurApplied = false
+                cancelPendingBlurInstall(state)
+                return
+            }
+            applyBlur(of: widget, radius: blurRadius, state: state)
+        }
     }
     
     public func createTooltipContainer(wrapping child: Widget) -> Widget {
@@ -744,6 +1007,117 @@ public final class WinUIBackend: AppBackend {
         // it's empty.
         size.y = max(usedHeight, Int(lineHeight))
         return size
+    }
+
+    public func textLayoutFragments(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> [TextLayoutFragment]? {
+        guard !text.isEmpty, let textBlock = widget as? TextBlock else {
+            return text.isEmpty ? [] : nil
+        }
+
+        guard let parent = textBlock.parent as? Canvas else {
+            return nil
+        }
+
+        updateTextView(measurementTextBlock, content: text, environment: environment)
+        measurementTextBlock.textWrapping = textBlock.textWrapping
+        measurementTextBlock.textAlignment = textBlock.textAlignment
+        let measuredSize = Self.measure(
+            measurementTextBlock,
+            proposedWidth: proposedWidth,
+            proposedHeight: proposedHeight
+        )
+
+        let layoutWidth = max(1, proposedWidth ?? measuredSize.x)
+        let layoutHeight = max(1, proposedHeight ?? measuredSize.y)
+        let measurementBox = TextBox()
+        measurementBox.text = text
+        measurementBox.textWrapping = textBlock.textWrapping
+        measurementBox.textAlignment = textBlock.textAlignment
+        measurementBox.padding = Thickness(left: 0, top: 0, right: 0, bottom: 0)
+        measurementBox.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
+        measurementBox.isReadOnly = true
+        measurementBox.acceptsReturn = true
+        measurementBox.opacity = 0
+        measurementBox.isHitTestVisible = false
+        measurementBox.width = Double(layoutWidth)
+        measurementBox.height = Double(layoutHeight)
+        environment.apply(to: measurementBox)
+
+        let childIndex = parent.children.size
+        parent.children.insertAt(childIndex, measurementBox)
+        Canvas.setLeft(measurementBox, -100_000)
+        Canvas.setTop(measurementBox, -100_000)
+        defer {
+            if parent.children.size > childIndex {
+                parent.children.removeAt(childIndex)
+            }
+        }
+
+        let layoutSize = WindowsFoundation.Size(
+            width: Float(layoutWidth),
+            height: Float(layoutHeight)
+        )
+        try? measurementBox.measure(layoutSize)
+        try? measurementBox.arrange(
+            WindowsFoundation.Rect(x: 0, y: 0, width: layoutSize.width, height: layoutSize.height)
+        )
+        try? measurementBox.updateLayout()
+        guard (try? measurementBox.getRectFromCharacterIndex(0, false)) != nil else {
+            return nil
+        }
+
+        var fragments: [TextLayoutFragment] = []
+        fragments.reserveCapacity(text.count)
+        var characterIndex = 0
+        var utf16Offset: Int32 = 0
+        var lowerBound = text.startIndex
+
+        while lowerBound < text.endIndex {
+            let upperBound = text.index(after: lowerBound)
+            let range = lowerBound..<upperBound
+            let nextOffset = utf16Offset + Int32(text[range].utf16.count)
+            guard
+                let startRect = try? measurementBox.getRectFromCharacterIndex(
+                    utf16Offset,
+                    false
+                ),
+                let endRect = try? measurementBox.getRectFromCharacterIndex(
+                    max(utf16Offset, nextOffset - 1),
+                    true
+                )
+            else {
+                return nil
+            }
+
+            let width = max(1, Int(abs(endRect.x - startRect.x).rounded(.awayFromZero)))
+            fragments.append(
+                TextLayoutFragment(
+                    characterIndex: characterIndex,
+                    sourceRange: range,
+                    origin: SIMD2(
+                        Int(startRect.x.rounded(.down)),
+                        Int(startRect.y.rounded(.down))
+                    ),
+                    size: SIMD2(
+                        width,
+                        max(1, Int(startRect.height.rounded(.awayFromZero)))
+                    ),
+                    baseline: 0
+                )
+            )
+
+            characterIndex += 1
+            utf16Offset = nextOffset
+            lowerBound = upperBound
+        }
+
+        return fragments
     }
 
     private static func measure(
@@ -1506,6 +1880,10 @@ public final class WinUIBackend: AppBackend {
                 }
             handleResponse(index)
         }
+    }
+
+    public func dismissAlert(_ alert: Alert, window: Window?) {
+        try! alert.hide()
     }
 
     public func showOpenDialog(

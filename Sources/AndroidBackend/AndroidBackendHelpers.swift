@@ -1,0 +1,30 @@
+import Foundation
+import AndroidKit
+import SwiftJava
+
+@JavaClass("dev.swiftcrossui.androidbackend.AndroidBackendHelpers")
+class AndroidBackendHelpers: JavaObject {
+    @JavaMethod
+    @_nonoverride convenience init(
+        environment: JNIEnvironment? = nil
+    )
+
+    @JavaMethod
+    func getWindowWidth(_ activity: Activity?) -> Int32
+
+    @JavaMethod
+    func getWindowHeight(_ activity: Activity?) -> Int32
+
+    @JavaMethod
+    func getPreferredFramesPerSecond(_ activity: Activity?) -> Float
+
+    @JavaMethod
+    func runOnMainThread(_ action: SwiftAction?)
+
+    @JavaMethod
+    func textLayoutFragmentMetrics(
+        _ textView: AndroidKit.TextView?,
+        _ text: String,
+        _ proposedWidth: Int32
+    ) -> [Int32]
+}

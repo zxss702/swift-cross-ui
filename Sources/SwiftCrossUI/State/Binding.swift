@@ -38,9 +38,15 @@ public struct Binding<Value> {
             getValue()
         }
         nonmutating set {
-            setValue(newValue)
+            setValue(
+                newValue,
+                transaction.overlaid(by: TransactionContext.current)
+            )
         }
     }
+
+    /// The transaction used when this binding writes to its source.
+    public var transaction: Transaction
 
     /// The binding itself.
     ///
@@ -53,7 +59,7 @@ public struct Binding<Value> {
     /// The stored getter.
     private let getValue: () -> Value
     /// The stored setter.
-    private let setValue: (Value) -> Void
+    private let setValue: (Value, Transaction) -> Void
 
     /// Creates a binding with a custom getter and setter.
     ///
@@ -71,6 +77,17 @@ public struct Binding<Value> {
     ///   - get: The binding's getter.
     ///   - set: The binding's setter.
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
+        self.transaction = Transaction()
+        self.getValue = get
+        self.setValue = { value, _ in set(value) }
+    }
+
+    /// Creates a binding with a custom getter and transaction-aware setter.
+    public init(
+        get: @escaping () -> Value,
+        set: @escaping (Value, Transaction) -> Void
+    ) {
+        self.transaction = Transaction()
         self.getValue = get
         self.setValue = set
     }
@@ -86,8 +103,8 @@ public struct Binding<Value> {
                 get: {
                     other.wrappedValue ?? initialValue
                 },
-                set: { newValue in
-                    other.wrappedValue = newValue
+                set: { newValue, transaction in
+                    other.setValue(newValue, transaction)
                 }
             )
         } else {
@@ -105,10 +122,12 @@ public struct Binding<Value> {
                 get: {
                     self.wrappedValue[keyPath: keyPath]
                 },
-                set: { newValue in
-                    self.wrappedValue[keyPath: keyPath] = newValue
+                set: { newValue, transaction in
+                    var value = self.wrappedValue
+                    value[keyPath: keyPath] = newValue
+                    self.setValue(value, transaction)
                 }
-            )
+            ).transaction(transaction)
         }
     }
 
@@ -121,10 +140,41 @@ public struct Binding<Value> {
     public func onChange(_ action: @escaping (Value) -> Void) -> Binding<Value> {
         return Binding<Value>(
             get: getValue,
-            set: { newValue in
-                self.setValue(newValue)
+            set: { newValue, transaction in
+                self.setValue(newValue, transaction)
                 action(newValue)
             }
-        )
+        ).transaction(transaction)
     }
+
+    /// Returns a binding that writes using the supplied transaction.
+    public func transaction(_ transaction: Transaction) -> Binding<Value> {
+        var binding = self
+        binding.transaction = transaction
+        return binding
+    }
+
+    /// Returns a binding that writes using a transaction with the given animation.
+    public func animation(_ animation: Animation? = .default) -> Binding<Value> {
+        var transaction = self.transaction
+        transaction.animation = animation
+        return self.transaction(transaction)
+    }
+
+    /// Creates a binding that always reads the given value and ignores writes.
+    public static func constant(_ value: Value) -> Binding<Value> {
+        Binding(get: { value }, set: { _, _ in })
+    }
+
+    public init(projectedValue: Binding<Value>) {
+        self = projectedValue
+    }
+}
+
+extension Binding: Identifiable where Value: Identifiable {
+    public var id: Value.ID {
+        wrappedValue.id
+    }
+
+    public typealias ID = Value.ID
 }

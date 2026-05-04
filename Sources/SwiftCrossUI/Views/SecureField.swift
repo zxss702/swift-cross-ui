@@ -19,11 +19,11 @@ public struct SecureField: ElementaryView, View {
         self._text = text
     }
 
-    func asWidget<Backend: AppBackend>(backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(backend: Backend) -> Backend.Widget {
         return backend.createSecureField()
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues,
@@ -39,7 +39,7 @@ public struct SecureField: ElementaryView, View {
         return ViewLayoutResult.leafView(size: size)
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
@@ -79,5 +79,11 @@ public struct SecureField: ElementaryView, View {
         }
 
         backend.setSize(of: widget, to: layout.size.vector)
+    }
+}
+
+extension SecureField: LayoutInputKeyProvider {
+    var layoutInputKey: AnyHashable? {
+        LayoutInputKeys.make(Self.self, values: [AnyHashable(placeholder)])
     }
 }
