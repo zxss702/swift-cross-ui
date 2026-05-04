@@ -468,7 +468,7 @@ extension ForEach: TypeSafeView, View where Child: View {
     }
 
     @MainActor
-    private func syncRenderedWidgets<Backend: AppBackend>(
+    private func syncRenderedWidgets<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         backend: Backend
@@ -501,7 +501,7 @@ extension ForEach: TypeSafeView, View where Child: View {
     }
 
     @MainActor
-    private func scheduleInsertionUpdateIfNeeded<Backend: AppBackend>(
+    private func scheduleInsertionUpdateIfNeeded<Backend: BaseAppBackend>(
         children: Children,
         environment: EnvironmentValues,
         backend: Backend
@@ -529,7 +529,7 @@ extension ForEach: TypeSafeView, View where Child: View {
     }
 
     @MainActor
-    private func scheduleRemovalsIfNeeded<Backend: AppBackend>(
+    private func scheduleRemovalsIfNeeded<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         environment: EnvironmentValues,
@@ -603,7 +603,7 @@ extension ForEach: TypeSafeView, View where Child: View {
     }
 
     @MainActor
-    private func requestGraphUpdate<Backend: AppBackend>(
+    private func requestGraphUpdate<Backend: BaseAppBackend>(
         children: Children,
         environment: EnvironmentValues,
         backend: Backend

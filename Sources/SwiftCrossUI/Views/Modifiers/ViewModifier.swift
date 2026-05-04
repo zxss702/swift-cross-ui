@@ -21,7 +21,7 @@ public struct ModifiedContent<Content: View, Modifier: ViewModifier>: TypeSafeVi
         self.modifier = modifier
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -34,7 +34,7 @@ public struct ModifiedContent<Content: View, Modifier: ViewModifier>: TypeSafeVi
         )
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: Children,
         backend: Backend
     ) -> Backend.Widget {
@@ -43,7 +43,7 @@ public struct ModifiedContent<Content: View, Modifier: ViewModifier>: TypeSafeVi
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -57,7 +57,7 @@ public struct ModifiedContent<Content: View, Modifier: ViewModifier>: TypeSafeVi
         )
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -85,7 +85,7 @@ class ModifiedContentChildren<Content: View>: ViewGraphNodeChildren {
         [ErasedViewGraphNode(wrapping: node)]
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         content: Content,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,
@@ -111,7 +111,7 @@ public struct PlaceholderContentView<Source>: TypeSafeView {
         self.content = content
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -124,7 +124,7 @@ public struct PlaceholderContentView<Source>: TypeSafeView {
         )
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: PlaceholderContentChildren,
         backend: Backend
     ) -> Backend.Widget {
@@ -134,7 +134,7 @@ public struct PlaceholderContentView<Source>: TypeSafeView {
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: PlaceholderContentChildren,
         proposedSize: ProposedViewSize,
@@ -149,7 +149,7 @@ public struct PlaceholderContentView<Source>: TypeSafeView {
         return result
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: PlaceholderContentChildren,
         layout: ViewLayoutResult,
@@ -172,7 +172,7 @@ class PlaceholderContentChildren: ViewGraphNodeChildren {
         [node]
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         content: any View,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,

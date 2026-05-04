@@ -32,7 +32,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
         self.animation = animation
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -46,7 +46,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
         )
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: PhaseAnimatorChildren,
         backend: Backend
     ) -> Backend.Widget {
@@ -55,7 +55,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: PhaseAnimatorChildren,
         proposedSize: ProposedViewSize,
@@ -71,7 +71,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
         return result
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: PhaseAnimatorChildren,
         layout: ViewLayoutResult,
@@ -104,7 +104,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
         currentPhaseIndex = 0
     }
 
-    private func scheduleNextPhaseIfNeeded<Backend: AppBackend>(
+    private func scheduleNextPhaseIfNeeded<Backend: BaseAppBackend>(
         children: PhaseAnimatorChildren,
         environment: EnvironmentValues,
         backend: Backend
@@ -121,7 +121,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
         )
     }
 
-    private func scheduleNextPhase<Backend: AppBackend>(
+    private func scheduleNextPhase<Backend: BaseAppBackend>(
         children: PhaseAnimatorChildren,
         generation: Int,
         environment: EnvironmentValues,
@@ -178,7 +178,7 @@ class PhaseAnimatorChildren: ViewGraphNodeChildren {
         [node]
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         content: AnyView,
         trigger: AnyEquatableValue?,
         backend: Backend,

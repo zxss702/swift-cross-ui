@@ -66,7 +66,7 @@ struct OffsetEffectView<Content: View>: TypeSafeView {
         self.offset = offset
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -79,13 +79,13 @@ struct OffsetEffectView<Content: View>: TypeSafeView {
         )
     }
 
-    func asWidget<Backend: AppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
         let container = backend.createContainer()
         backend.insert(children.child.widget.into(), into: container, at: 0)
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -102,7 +102,7 @@ struct OffsetEffectView<Content: View>: TypeSafeView {
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -146,7 +146,7 @@ struct TransformEffectView<Content: View>: TypeSafeView {
         self.anchor = anchor
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -159,13 +159,13 @@ struct TransformEffectView<Content: View>: TypeSafeView {
         )
     }
 
-    func asWidget<Backend: AppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
         let container = backend.createContainer()
         backend.insert(children.child.widget.into(), into: container, at: 0)
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -182,7 +182,7 @@ struct TransformEffectView<Content: View>: TypeSafeView {
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -239,7 +239,7 @@ struct BlurEffectView<Content: View>: TypeSafeView {
         self.opaque = opaque
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -252,13 +252,13 @@ struct BlurEffectView<Content: View>: TypeSafeView {
         )
     }
 
-    func asWidget<Backend: AppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
         let container = backend.createContainer()
         backend.insert(children.child.widget.into(), into: container, at: 0)
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -274,7 +274,7 @@ struct BlurEffectView<Content: View>: TypeSafeView {
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -316,7 +316,7 @@ struct ZIndexEffectView<Content: View>: TypeSafeView {
         self.zIndex = zIndex
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -324,13 +324,13 @@ struct ZIndexEffectView<Content: View>: TypeSafeView {
         body.children(backend: backend, snapshots: snapshots, environment: environment)
     }
 
-    func asWidget<Backend: AppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
         let container = backend.createContainer()
         backend.insert(children.child0.widget.into(), into: container, at: 0)
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -345,7 +345,7 @@ struct ZIndexEffectView<Content: View>: TypeSafeView {
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,

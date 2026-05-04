@@ -39,7 +39,7 @@ where KeyframePath.Value == Value {
         self.keyframes = keyframes
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -55,7 +55,7 @@ where KeyframePath.Value == Value {
         )
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: KeyframeAnimatorChildren<Value>,
         backend: Backend
     ) -> Backend.Widget {
@@ -64,7 +64,7 @@ where KeyframePath.Value == Value {
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: KeyframeAnimatorChildren<Value>,
         proposedSize: ProposedViewSize,
@@ -84,7 +84,7 @@ where KeyframePath.Value == Value {
         return result
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: KeyframeAnimatorChildren<Value>,
         layout: ViewLayoutResult,
@@ -256,7 +256,7 @@ class KeyframeAnimatorChildren<Value>: ViewGraphNodeChildren {
         [node]
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         content: AnyView,
         trigger: AnyEquatableValue?,
         shouldRun: Bool,

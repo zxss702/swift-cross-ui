@@ -22,6 +22,12 @@ extension BackendFeatures {
         /// This is used to determine text sizing and other adaptive properties.
         var deviceClass: DeviceClass { get }
 
+        /// Preferred frame rate for graph-driven animations.
+        ///
+        /// Backends may lower this for platforms where scheduling frames more
+        /// frequently is wasteful or unsupported.
+        nonisolated var preferredFramesPerSecond: Double { get }
+
         /// Runs the backend's main run loop.
         ///
         /// The app will exit when this method returns. This will always be the
@@ -80,5 +86,13 @@ extension BackendFeatures {
         ///
         /// - Parameter action: The root environment change handler.
         func setRootEnvironmentChangeHandler(to action: @escaping @Sendable @MainActor () -> Void)
+    }
+}
+
+// MARK: Default Implementations
+
+extension BackendFeatures.Core {
+    public nonisolated var preferredFramesPerSecond: Double {
+        60
     }
 }

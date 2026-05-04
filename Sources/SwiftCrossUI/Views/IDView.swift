@@ -18,7 +18,7 @@ public struct IDView<Content: View, ID: Hashable>: TypeSafeView, TransitionTrait
         self.id = id
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -31,7 +31,7 @@ public struct IDView<Content: View, ID: Hashable>: TypeSafeView, TransitionTrait
         )
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: Children,
         backend: Backend
     ) -> Backend.Widget {
@@ -43,7 +43,7 @@ public struct IDView<Content: View, ID: Hashable>: TypeSafeView, TransitionTrait
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -58,7 +58,7 @@ public struct IDView<Content: View, ID: Hashable>: TypeSafeView, TransitionTrait
         )
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -98,7 +98,7 @@ class IDViewChildren<Content: View, ID: Hashable>: ViewGraphNodeChildren {
         state.erasedNodes
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         from view: IDView<Content, ID>,
         backend: Backend,
         snapshot: ViewGraphSnapshotter.NodeSnapshot?,

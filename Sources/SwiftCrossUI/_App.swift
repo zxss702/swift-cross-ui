@@ -45,10 +45,12 @@ class _App<AppRoot: App>: ViewModelObserver {
         if let sceneGraphRoot {
             let body = self.observe(in: backend) { app.body }
             let result = sceneGraphRoot.updateNode(body, environment: environment)
-            backend.setApplicationMenu(
-                result.preferences.commands.resolve(),
-                environment: environment
-            )
+            if let backend = backend as? any BackendFeatures.ApplicationMenus {
+                backend.setApplicationMenu(
+                    result.preferences.commands.resolve(),
+                    environment: environment
+                )
+            }
             sceneGraphRoot.update(
                 backend: backend,
                 environment: environment
@@ -56,7 +58,7 @@ class _App<AppRoot: App>: ViewModelObserver {
         }
     }
 
-    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
+    func viewModelDidChange<Backend: BaseAppBackend>(backend: Backend) {
         enqueueRefreshSceneGraph(
             backend: backend,
             transaction: StateMutationContext.currentTransaction
@@ -64,14 +66,14 @@ class _App<AppRoot: App>: ViewModelObserver {
         )
     }
 
-    func enqueueObservedChange<Backend: AppBackend>(
+    func enqueueObservedChange<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction
     ) {
         enqueueRefreshSceneGraph(backend: backend, transaction: transaction)
     }
 
-    private func enqueueRefreshSceneGraph<Backend: AppBackend>(
+    private func enqueueRefreshSceneGraph<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction
     ) {

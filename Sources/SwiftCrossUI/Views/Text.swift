@@ -70,10 +70,10 @@ extension Text: LayoutInputKeyProvider {
     }
 }
 
-extension Text: ElementaryView {
+extension Text: TypeSafeView {
     typealias Children = TextChildren
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -81,7 +81,8 @@ extension Text: ElementaryView {
         TextChildren(backend: backend)
     }
 
-     public func asWidget<Backend: BaseAppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
+        _ children: TextChildren,
         backend: Backend
     ) -> Backend.Widget {
         let container = backend.createContainer()
@@ -89,7 +90,7 @@ extension Text: ElementaryView {
         return container
     }
 
-    public func computeLayout<Backend: BaseAppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: TextChildren,
         proposedSize: ProposedViewSize,
@@ -124,7 +125,7 @@ extension Text: ElementaryView {
         return ViewLayoutResult.leafView(size: ViewSize(size))
     }
 
-    public func commit<Backend: BaseAppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: TextChildren,
         layout: ViewLayoutResult,
@@ -139,7 +140,7 @@ extension Text: ElementaryView {
         )
     }
 
-    @MainActor private func measuredSize<Backend: AppBackend>(
+    @MainActor private func measuredSize<Backend: BaseAppBackend>(
         of text: String,
         widget: Backend.Widget,
         proposedSize: ProposedViewSize,
@@ -188,11 +189,11 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         fragmentNodes.map(\.node)
     }
 
-    init<Backend: AppBackend>(backend: Backend) {
+    init<Backend: BaseAppBackend>(backend: Backend) {
         textWidget = AnyWidget(backend.createTextView())
     }
 
-    func rebuild<Backend: AppBackend>(container: Backend.Widget, backend: Backend) {
+    func rebuild<Backend: BaseAppBackend>(container: Backend.Widget, backend: Backend) {
         backend.removeAllChildren(of: container)
         for (index, child) in widgets.enumerated() {
             backend.insert(child.into(), into: container, at: index)
@@ -200,7 +201,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         needsRebuild = false
     }
 
-    func update<Backend: AppBackend>(
+    func update<Backend: BaseAppBackend>(
         text: String,
         size: SIMD2<Int>,
         proposedSize: ProposedViewSize,
@@ -264,7 +265,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         computeFragments(environment: environment)
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         container: Backend.Widget,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
@@ -314,7 +315,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         }
     }
 
-    private func makeFragments<Backend: AppBackend>(
+    private func makeFragments<Backend: BaseAppBackend>(
         previousText: String,
         currentText: String,
         size: SIMD2<Int>,
@@ -363,7 +364,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         )
     }
 
-    private func makeWholeTextFragments<Backend: AppBackend>(
+    private func makeWholeTextFragments<Backend: BaseAppBackend>(
         previousText: String,
         currentText: String,
         size: SIMD2<Int>,
@@ -408,7 +409,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         ]
     }
 
-    private func makeCharacterFragments<Backend: AppBackend>(
+    private func makeCharacterFragments<Backend: BaseAppBackend>(
         previous: TextLayoutSnapshot,
         current: TextLayoutSnapshot,
         transition: ContentTransition,
@@ -517,7 +518,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         return nodes
     }
 
-    private func stableNode<Backend: AppBackend>(
+    private func stableNode<Backend: BaseAppBackend>(
         index: Int,
         snapshot: TextLayoutSnapshot,
         runID: Int,
@@ -543,7 +544,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         )
     }
 
-    private func makeFragmentNode<Backend: AppBackend>(
+    private func makeFragmentNode<Backend: BaseAppBackend>(
         text: String,
         fragment: TextLayoutFragment,
         transition: AnyTransition,
@@ -652,7 +653,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         ), delay)
     }
 
-    private func schedulePhaseUpdate<Backend: AppBackend>(
+    private func schedulePhaseUpdate<Backend: BaseAppBackend>(
         environment: EnvironmentValues,
         backend: Backend
     ) {
@@ -692,7 +693,7 @@ final class TextChildren: ViewGraphNodeChildren, @unchecked Sendable {
         }
     }
 
-    private func scheduleCleanup<Backend: AppBackend>(
+    private func scheduleCleanup<Backend: BaseAppBackend>(
         environment: EnvironmentValues,
         backend: Backend
     ) {
@@ -779,7 +780,7 @@ private struct TextLayoutSnapshot {
     var characters: [Character]
     var fragments: [Int: TextLayoutFragment]
 
-    @MainActor init?<Backend: AppBackend>(
+    @MainActor init?<Backend: BaseAppBackend>(
         text: String,
         widget: Backend.Widget,
         proposedSize: ProposedViewSize,
@@ -819,11 +820,11 @@ private struct StaticTextFragment: ElementaryView, LayoutInputKeyProvider {
         LayoutInputKeys.make(Self.self, values: [AnyHashable(string)])
     }
 
-    func asWidget<Backend: AppBackend>(backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(backend: Backend) -> Backend.Widget {
         backend.createTextView()
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues,
@@ -842,7 +843,7 @@ private struct StaticTextFragment: ElementaryView, LayoutInputKeyProvider {
         return .leafView(size: size)
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,

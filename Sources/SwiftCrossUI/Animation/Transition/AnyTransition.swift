@@ -155,7 +155,7 @@ struct TransitionModifierView<Content: View>: TypeSafeView, TransitionTraitProvi
         self.transition = transition
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -167,7 +167,7 @@ struct TransitionModifierView<Content: View>: TypeSafeView, TransitionTraitProvi
         )
     }
 
-    func asWidget<Backend: AppBackend>(
+    func asWidget<Backend: BaseAppBackend>(
         _ children: Children,
         backend: Backend
     ) -> Backend.Widget {
@@ -176,7 +176,7 @@ struct TransitionModifierView<Content: View>: TypeSafeView, TransitionTraitProvi
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -191,7 +191,7 @@ struct TransitionModifierView<Content: View>: TypeSafeView, TransitionTraitProvi
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,

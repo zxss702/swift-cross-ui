@@ -17,3 +17,4 @@ public typealias BaseAppBackend =
     & BackendFeatures.Containers
     & BackendFeatures.PassiveViews
     & BackendFeatures.Controls
+    & BackendFeatures.ViewEffects

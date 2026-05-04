@@ -18,7 +18,7 @@ final class DynamicTransitionState {
         removals.map(\.node) + [activeNode].compactMap { $0 }
     }
 
-    func update<Backend: AppBackend>(
+    func update<Backend: BaseAppBackend>(
         content: DynamicTransitionContent?,
         proposedSize: ProposedViewSize,
         environment: EnvironmentValues,
@@ -67,7 +67,7 @@ final class DynamicTransitionState {
         return result
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         widget: Backend.Widget,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
@@ -163,7 +163,7 @@ final class DynamicTransitionState {
         return result
     }
 
-    private func scheduleRemovalIfNeeded<Backend: AppBackend>(
+    private func scheduleRemovalIfNeeded<Backend: BaseAppBackend>(
         widget: Backend.Widget,
         environment: EnvironmentValues,
         backend: Backend
@@ -201,7 +201,7 @@ final class DynamicTransitionState {
         }
     }
 
-    private func scheduleInsertionUpdateIfNeeded<Backend: AppBackend>(
+    private func scheduleInsertionUpdateIfNeeded<Backend: BaseAppBackend>(
         environment: EnvironmentValues,
         backend: Backend
     ) {
@@ -217,7 +217,7 @@ final class DynamicTransitionState {
         )
     }
 
-    private func requestGraphUpdate<Backend: AppBackend>(
+    private func requestGraphUpdate<Backend: BaseAppBackend>(
         environment: EnvironmentValues,
         backend: Backend
     ) {

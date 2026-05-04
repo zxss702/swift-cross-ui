@@ -14,7 +14,7 @@ final class AnimatableEffectChildren<Content: View, Value: VectorArithmetic>:
         [ErasedViewGraphNode(wrapping: child)]
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         content: Content,
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,

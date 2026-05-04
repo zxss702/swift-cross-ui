@@ -27,7 +27,7 @@ final class GraphUpdateHost: @unchecked Sendable {
     private final class FrameClock {
         private var hasScheduledFrame = false
 
-        func requestFrame<Backend: AppBackend>(
+        func requestFrame<Backend: BaseAppBackend>(
             backend: Backend,
             action: @escaping @MainActor @Sendable (DispatchTime) -> Void
         ) {
@@ -86,7 +86,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         !pendingMutationKeys.isEmpty
     }
 
-    func enqueue<Backend: AppBackend>(
+    func enqueue<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction,
         key: AnyHashable,
@@ -107,7 +107,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         requestTransactionFlush(backend: backend)
     }
 
-    func enqueueRenderFrame<Backend: AppBackend>(
+    func enqueueRenderFrame<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction,
         key: AnyHashable,
@@ -128,7 +128,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         requestRenderFlush(backend: backend)
     }
 
-    func enqueueAfter<Backend: AppBackend>(
+    func enqueueAfter<Backend: BaseAppBackend>(
         backend: Backend,
         delay: TimeInterval,
         transaction: Transaction,
@@ -166,7 +166,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         }
     }
 
-    private func requestTransactionFlush<Backend: AppBackend>(backend: Backend) {
+    private func requestTransactionFlush<Backend: BaseAppBackend>(backend: Backend) {
         let request: @MainActor () -> Void = { [weak self, backend] in
             guard let self else {
                 return
@@ -194,7 +194,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         }
     }
 
-    private func requestRenderFlush<Backend: AppBackend>(backend: Backend) {
+    private func requestRenderFlush<Backend: BaseAppBackend>(backend: Backend) {
         let schedule: @MainActor () -> Void = { [weak self, backend] in
             guard let self else {
                 return
@@ -211,7 +211,7 @@ final class GraphUpdateHost: @unchecked Sendable {
         schedule()
     }
 
-    private func scheduleRenderFlush<Backend: AppBackend>(backend: Backend) {
+    private func scheduleRenderFlush<Backend: BaseAppBackend>(backend: Backend) {
         guard !hasScheduledRenderFlush else {
             return
         }

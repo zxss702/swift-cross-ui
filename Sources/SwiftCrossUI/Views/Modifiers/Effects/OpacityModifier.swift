@@ -16,7 +16,7 @@ struct OpacityEffectView<Content: View>: TypeSafeView {
         self.opacity = opacity
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -29,13 +29,13 @@ struct OpacityEffectView<Content: View>: TypeSafeView {
         )
     }
 
-    func asWidget<Backend: AppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
         let container = backend.createContainer()
         backend.insert(children.child.widget.into(), into: container, at: 0)
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -51,7 +51,7 @@ struct OpacityEffectView<Content: View>: TypeSafeView {
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,

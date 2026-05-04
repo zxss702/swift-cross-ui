@@ -334,7 +334,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         }
     }
 
-    func viewModelDidChange<Backend: AppBackend>(backend: Backend) {
+    func viewModelDidChange<Backend: BaseAppBackend>(backend: Backend) {
         enqueueUpdate(
             backend: backend,
             transaction: StateMutationContext.currentTransaction
@@ -345,7 +345,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         }
     }
 
-    func enqueueObservedChange<Backend: AppBackend>(
+    func enqueueObservedChange<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction
     ) {
@@ -358,7 +358,7 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
         }
     }
 
-    private func enqueueUpdate<Backend: AppBackend>(
+    private func enqueueUpdate<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction,
         key: AnyHashable,

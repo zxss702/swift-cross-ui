@@ -8,7 +8,7 @@ import PerceptionCore
 /// This is where updates are initiated when a view's state updates, and where state is persisted
 /// even when a view gets recomputed by its parent.
 @MainActor
-public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserver, Sendable {
+public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ViewModelObserver, Sendable {
     private struct CurrentLayoutCacheKey: Equatable {
         var proposedSize: ProposedViewSize
         var environment: AnyHashable
@@ -158,13 +158,13 @@ public class ViewGraphNode<NodeView: View, Backend: AppBackend>: ViewModelObserv
         ObjectIdentifier(self)
     }
 
-    func viewModelDidChange<B: AppBackend>(backend: B) {
+    func viewModelDidChange<B: BaseAppBackend>(backend: B) {
         let transaction = StateMutationContext.currentTransaction
             .overlaid(by: TransactionContext.current)
         enqueueBottomUpUpdate(transaction: transaction)
     }
 
-    func enqueueObservedChange<B: AppBackend>(
+    func enqueueObservedChange<B: BaseAppBackend>(
         backend: B,
         transaction: Transaction
     ) {

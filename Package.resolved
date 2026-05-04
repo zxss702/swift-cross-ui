@@ -1,5 +1,5 @@
 {
-  "originHash" : "1ab616f4e066c05334e087fd60fbd4cb842e764b1f7b59093a9a799fcd9d94fe",
+  "originHash" : "581053f662f4f37c7cbe33268e98c343fca79a220d9b0f2fb3bb8c3b786aaa52",
   "pins" : [
     {
       "identity" : "androidkit",
@@ -155,12 +155,12 @@
       }
     },
     {
-      "identity" : "swift-subprocess",
+      "identity" : "swift-perception",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-subprocess.git",
+      "location" : "https://github.com/pointfreeco/swift-perception.git",
       "state" : {
-        "revision" : "13d087685b95d64d6aac9b94500d347bbe84c39b",
-        "version" : "0.4.0"
+        "revision" : "25ac73741c3436605d61eceb5207e896973918e7",
+        "version" : "2.0.10"
       }
     },
     {
@@ -251,6 +251,15 @@
       "state" : {
         "revision" : "f408b73ebb86a33411f27a668e2d843a10f007c2",
         "version" : "0.2.1"
+      }
+    },
+    {
+      "identity" : "xctest-dynamic-overlay",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
+      "state" : {
+        "revision" : "dfd70507def84cb5fb821278448a262c6ff2bbad",
+        "version" : "1.9.0"
       }
     },
     {

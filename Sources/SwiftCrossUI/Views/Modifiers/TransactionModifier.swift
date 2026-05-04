@@ -40,7 +40,7 @@ struct AnimationValueModifierView<Content: View, Value: Equatable>: TypeSafeView
         self.value = value
     }
 
-    func children<Backend: AppBackend>(
+    func children<Backend: BaseAppBackend>(
         backend: Backend,
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
@@ -54,13 +54,13 @@ struct AnimationValueModifierView<Content: View, Value: Equatable>: TypeSafeView
         )
     }
 
-    func asWidget<Backend: AppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
+    func asWidget<Backend: BaseAppBackend>(_ children: Children, backend: Backend) -> Backend.Widget {
         let container = backend.createContainer()
         backend.insert(children.child.widget.into(), into: container, at: 0)
         return container
     }
 
-    func computeLayout<Backend: AppBackend>(
+    func computeLayout<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         proposedSize: ProposedViewSize,
@@ -80,7 +80,7 @@ struct AnimationValueModifierView<Content: View, Value: Equatable>: TypeSafeView
         return ViewLayoutResult(size: childResult.size, childResults: [childResult])
     }
 
-    func commit<Backend: AppBackend>(
+    func commit<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
@@ -127,7 +127,7 @@ class AnimationValueModifierChildren<Content: View, Value: Equatable>: ViewGraph
         [ErasedViewGraphNode(wrapping: child)]
     }
 
-    init<Backend: AppBackend>(
+    init<Backend: BaseAppBackend>(
         content: Content,
         value: Value,
         backend: Backend,

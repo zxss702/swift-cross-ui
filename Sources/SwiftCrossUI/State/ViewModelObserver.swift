@@ -29,19 +29,19 @@ protocol ViewModelObserver: AnyObject, Sendable {
     /// When this method has been called, it will not be called again until the next call to `observe()`.
     ///
     /// - Parameter backend: The backend passed to the last call to `observe()`.
-    func viewModelDidChange<Backend: AppBackend>(backend: Backend)
+    func viewModelDidChange<Backend: BaseAppBackend>(backend: Backend)
 
     /// Enqueues an observed model change into the owning graph's transaction
     /// queue. Implementations that own a graph should override this instead of
     /// running a layout update directly on the backend main thread.
-    func enqueueObservedChange<Backend: AppBackend>(
+    func enqueueObservedChange<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction
     )
 }
 
 extension ViewModelObserver {
-    func enqueueObservedChange<Backend: AppBackend>(
+    func enqueueObservedChange<Backend: BaseAppBackend>(
         backend: Backend,
         transaction: Transaction
     ) {
@@ -66,7 +66,7 @@ extension ViewModelObserver {
     ///   - computation: The computation to be tracked. Usually, accesses to a view's `body`
     ///   property will be encapsulated in this closure.
     /// - Returns: The result of the computation.
-    func observe<Backend: AppBackend, Result>(
+    func observe<Backend: BaseAppBackend, Result>(
         in backend: Backend,
         _ computation: () -> Result
     ) -> Result {
