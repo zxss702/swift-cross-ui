@@ -25,4 +25,3 @@ public struct EmptyAnimatableData: VectorArithmetic, Equatable {
         0
     }
 }
-

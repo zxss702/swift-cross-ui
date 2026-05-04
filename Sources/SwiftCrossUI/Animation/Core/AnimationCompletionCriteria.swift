@@ -9,4 +9,3 @@ public struct AnimationCompletionCriteria: Hashable, Sendable {
         self.name = name
     }
 }
-

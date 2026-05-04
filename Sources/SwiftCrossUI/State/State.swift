@@ -68,14 +68,14 @@ extension State {
     public init(wrappedValue initialValue: Value) where Value: ObservableObject {
         implementation = StateImpl(initialStorage: Storage(initialValue))
     }
-    
+
     // NB: Needed to prevent deprecation warnings for `Observable` types, which
     // *are* supported
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     public init(wrappedValue initialValue: Value) where Value: Observable & AnyObject {
         implementation = StateImpl(initialStorage: Storage(initialValue))
     }
-    
+
 #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
     // NB: Needed to prevent deprecation warnings for `Perceptible` types, which
     // *are* supported

@@ -112,4 +112,3 @@ where Entries.Element == Date {
         dates
     }
 }
-

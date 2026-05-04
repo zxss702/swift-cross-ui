@@ -42,4 +42,3 @@ where First: Equatable, Second: Equatable {
         first.magnitudeSquared + second.magnitudeSquared
     }
 }
-

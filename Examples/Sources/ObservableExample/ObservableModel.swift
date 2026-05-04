@@ -31,7 +31,7 @@ class ObservableModel {
     var windowText: String = "Window Text"
     var view1Text: String = "View 1 Text"
     var view2Text: String = "View 2 Text"
-    
+
     func startAutomaticMode() {
         guard !automaticModeIsOn else { return }
         automaticModeIsOn = true
@@ -39,7 +39,7 @@ class ObservableModel {
             while true {
                 // Wait one second before changing the next text
                 try await Task.sleep(nanoseconds: 1_000_000_000)
-                
+
                 let animal = animalList.randomElement()!
                 let textIndex = Int.random(in: 0..<4)
                 switch textIndex {
