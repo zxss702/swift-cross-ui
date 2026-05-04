@@ -156,6 +156,12 @@ extension AppStorage {
     }
 }
 
+extension AppStorage: DynamicPropertyLocationToken {
+    var dynamicPropertyLocationToken: AnyObject {
+        implementation.box
+    }
+}
+
 // MARK: - AppStorageKey
 
 extension AppStorage {

@@ -107,3 +107,9 @@ extension State: SnapshottableProperty {
         }
     }
 }
+
+extension State: DynamicPropertyLocationToken {
+    var dynamicPropertyLocationToken: AnyObject {
+        implementation.box
+    }
+}

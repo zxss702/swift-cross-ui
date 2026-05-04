@@ -4,6 +4,10 @@
 /// Conforming types should use internal mutability to implement this protocol's
 /// non-`mutating` methods if required. This protocol avoids mutation to allow
 /// state properties and such to be captured even though views are structs.
+protocol DynamicPropertyLocationToken {
+    var dynamicPropertyLocationToken: AnyObject { get }
+}
+
 public protocol DynamicProperty {
     /// Updates the property.
     ///

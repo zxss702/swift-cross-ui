@@ -99,3 +99,9 @@ public struct Environment<Value>: DynamicProperty {
         }
     }
 }
+
+extension Environment: DynamicPropertyLocationToken {
+    var dynamicPropertyLocationToken: AnyObject {
+        value
+    }
+}

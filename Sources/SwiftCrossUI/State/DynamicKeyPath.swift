@@ -11,10 +11,10 @@
 /// A type similar to KeyPath, but that can be constructed at run time given
 /// an instance of a struct, and the value of the desired property.
 ///
-/// Construction fails if the property's in-memory representation is not unique within the
-/// struct. SwiftCrossUI only uses `DynamicKeyPath` in situations where it is
-/// highly likely for properties to have unique in-memory representations, such
-/// as when properties have internal storage pointers.
+/// Construction fails if the property doesn't expose a stable reference token,
+/// or if that token's in-memory representation is not unique within the struct.
+/// SwiftCrossUI's dynamic property wrappers expose their internal storage
+/// object as that token.
 struct DynamicKeyPath<Base, Value> {
     /// The property's offset within instances of `Base`.
     var offset: Int
@@ -22,10 +22,11 @@ struct DynamicKeyPath<Base, Value> {
     /// Constructs a key path given an instance of the base type, and the
     /// value of the desired property.
     ///
-    /// The initializer will search through the base instance's in-memory
-    /// representation to find the unique offset that matches the representation
-    /// of the given property value. If such an offset can't be found or isn't
-    /// unique, then the initialiser returns `nil`.
+    /// The initializer will find a stable reference token inside the property,
+    /// then search for that token inside the base instance. The difference
+    /// between those two token offsets is the property's offset. If such an
+    /// offset can't be found or isn't unique, then the initialiser returns
+    /// `nil`.
     ///
     /// - Parameters:
     ///   - value: The value to construct a key path to.
@@ -36,27 +37,86 @@ struct DynamicKeyPath<Base, Value> {
         of base: Base,
         label: String? = nil
     ) {
+        guard let valueWithToken = value as? any DynamicPropertyLocationToken else {
+            logger.warning(
+                "no location token found for dynamic property",
+                metadata: ["property": "\(label ?? "<unknown>")"]
+            )
+            return nil
+        }
+
+        guard
+            let offset = Self.offsetUsingLocationToken(
+                valueWithToken.dynamicPropertyLocationToken,
+                property: value,
+                base: base,
+                label: label
+            )
+        else {
+            return nil
+        }
+
+        self.offset = offset
+    }
+
+    private static func offsetUsingLocationToken(
+        _ token: AnyObject,
+        property: Value,
+        base: Base,
+        label: String?
+    ) -> Int? {
+        var tokenPointer = UInt(bitPattern: Unmanaged.passUnretained(token).toOpaque())
+
+        guard
+            let tokenOffsetInProperty = uniqueMatchOffset(
+                of: &tokenPointer,
+                in: property
+            )
+        else {
+            logger.warning(
+                "no token offset found for dynamic property",
+                metadata: ["property": "\(label ?? "<unknown>")"]
+            )
+            return nil
+        }
+
         let propertyAlignment = MemoryLayout<Value>.alignment
         let propertySize = MemoryLayout<Value>.size
         let baseStructSize = MemoryLayout<Base>.size
+        let pointerSize = MemoryLayout<UInt>.size
 
-        var index = 0
-        var matches: [Int] = []
-        while index + propertySize <= baseStructSize {
-            let isMatch =
-                withUnsafeBytes(of: base) { viewPointer in
-                    withUnsafeBytes(of: value) { valuePointer in
+        var matches: Set<Int> = []
+        withUnsafeBytes(of: base) { basePointer in
+            withUnsafeBytes(of: &tokenPointer) { tokenPointerBytes in
+                guard
+                    let baseAddress = basePointer.baseAddress,
+                    let tokenPointerAddress = tokenPointerBytes.baseAddress
+                else {
+                    return
+                }
+
+                var index = 0
+                while index + pointerSize <= baseStructSize {
+                    let isMatch =
                         memcmp(
-                            viewPointer.baseAddress!.advanced(by: index),
-                            valuePointer.baseAddress!,
-                            propertySize
-                        )
+                            baseAddress.advanced(by: index),
+                            tokenPointerAddress,
+                            pointerSize
+                        ) == 0
+
+                    if isMatch {
+                        let propertyOffset = index - tokenOffsetInProperty
+                        if propertyOffset >= 0,
+                            propertyOffset + propertySize <= baseStructSize,
+                            propertyOffset % propertyAlignment == 0
+                        {
+                            matches.insert(propertyOffset)
+                        }
                     }
-                } == 0
-            if isMatch {
-                matches.append(index)
+
+                    index += 1
+                }
             }
-            index += propertyAlignment
         }
 
         guard let offset = matches.first else {
@@ -75,7 +135,45 @@ struct DynamicKeyPath<Base, Value> {
             return nil
         }
 
-        self.offset = offset
+        return offset
+    }
+
+    private static func uniqueMatchOffset<Needle, Haystack>(
+        of needle: inout Needle,
+        in haystack: Haystack
+    ) -> Int? {
+        let needleSize = MemoryLayout<Needle>.size
+        let haystackSize = MemoryLayout<Haystack>.size
+        var matches: [Int] = []
+
+        withUnsafeBytes(of: haystack) { haystackPointer in
+            withUnsafeBytes(of: &needle) { needlePointer in
+                guard
+                    let haystackAddress = haystackPointer.baseAddress,
+                    let needleAddress = needlePointer.baseAddress
+                else {
+                    return
+                }
+
+                var index = 0
+                while index + needleSize <= haystackSize {
+                    if memcmp(
+                        haystackAddress.advanced(by: index),
+                        needleAddress,
+                        needleSize
+                    ) == 0 {
+                        matches.append(index)
+                    }
+                    index += 1
+                }
+            }
+        }
+
+        guard matches.count == 1 else {
+            return nil
+        }
+
+        return matches[0]
     }
 
     /// Gets the property's value on the given instance.

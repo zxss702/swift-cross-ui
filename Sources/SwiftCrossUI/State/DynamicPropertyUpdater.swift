@@ -16,15 +16,13 @@ var updaterCache: [ObjectIdentifier: Any] = [:]
 /// annotated with the ``State`` property wrapper.
 ///
 /// At initialisation, the updater will attempt to determine the byte offset of
-/// each stateful property in the struct. This is guaranteed to succeed if every
-/// dynamic property in the provided struct instance contains internal mutable
-/// storage, because the storage pointers will provide unique byte sequences.
-/// Otherwise, offset discovery will fail when two dynamic properties share the
-/// same pattern in memory. When offset discovery fails the updater will fall
-/// back to using `Mirror`s each time `update` gets called, which can be 1500x
-/// times slower when the view has 0 state properties, and 9x slower when the
-/// view has 4 properties, with the factor slowly dropping as the number of
-/// properties increases.
+/// each stateful property in the struct. This is guaranteed to succeed for
+/// SwiftCrossUI's dynamic properties when their internal storage object is
+/// uniquely represented in the base value. When offset discovery fails the
+/// updater will fall back to using `Mirror`s each time `update` gets called,
+/// which can be 1500x times slower when the view has 0 state properties, and
+/// 9x slower when the view has 4 properties, with the factor slowly dropping as
+/// the number of properties increases.
 struct DynamicPropertyUpdater<Base> {
     typealias PropertyUpdater = (
         _ old: Base?,
@@ -83,12 +81,7 @@ struct DynamicPropertyUpdater<Base> {
                 )
                 self.propertyUpdaters = nil
 
-                // We intentionally return without caching the updaters here so
-                // that we if this failure is a fluke we can recover on a
-                // subsequent attempt for the same type. It may turn out that in
-                // practice types that fail are ones that always fail, in which
-                // case we should update this code to add the current updater to
-                // the cache.
+                updaterCache[ObjectIdentifier(Base.self)] = self
                 return
             }
 
