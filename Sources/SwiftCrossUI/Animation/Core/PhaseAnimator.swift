@@ -157,7 +157,7 @@ public struct PhaseAnimator<Phase: Equatable, Content: View>: TypeSafeView {
                 return
             }
             currentPhaseIndex = nextIndex
-            if trigger == nil {
+            if trigger == nil || nextIndex < phases.count - 1 {
                 children.scheduledGeneration = nil
             }
         }
