@@ -1665,10 +1665,8 @@ public final class WinUIBackend:
         ofSplitView splitView: Widget,
         to action: @escaping () -> Void
     ) {
-        // WinUI's SplitView currently doesn't support resizing, but we still
-        // store the sidebar resize handler because we programmatically resize
-        // the sidebar and call the handler whenever the minimum sidebar width
-        // changes.
+        // WinUI's SplitView currently doesn't expose user-driven resizing.
+        // Keep the hook so the backend can notify the graph if that changes.
         let splitView = splitView as! CustomSplitView
         splitView.sidebarResizeHandler = action
     }
@@ -1684,10 +1682,12 @@ public final class WinUIBackend:
         maximum maximumWidth: Int
     ) {
         let splitView = splitView as! CustomSplitView
-        let newWidth = Double(max(minimumWidth, 10))
+        let minimumWidth = max(minimumWidth, 10)
+        let maximumWidth = max(maximumWidth, minimumWidth)
+        let currentWidth = Int(splitView.openPaneLength.rounded(.towardZero))
+        let newWidth = Double(min(max(currentWidth, minimumWidth), maximumWidth))
         if newWidth != splitView.openPaneLength {
             splitView.openPaneLength = newWidth
-            splitView.sidebarResizeHandler?()
         }
     }
 
