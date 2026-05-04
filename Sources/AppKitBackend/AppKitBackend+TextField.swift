@@ -179,8 +179,8 @@ private class NSObservableTextField: NSTextField {
     }
 
     var onEdit: ((NSTextField) -> Void)?
-    var _onSubmitAction = Action({})
-    var onSubmit: @MainActor () -> Void {
+    var _onSubmitAction = TextFieldAction({})
+    var onSubmit: () -> Void {
         get {
             _onSubmitAction.action
         }
@@ -198,8 +198,8 @@ private class NSObservableSecureTextField: NSSecureTextField {
     }
 
     var onEdit: ((NSSecureTextField) -> Void)?
-    var _onSubmitAction = Action({})
-    var onSubmit: @MainActor () -> Void {
+    var _onSubmitAction = TextFieldAction({})
+    var onSubmit: () -> Void {
         get {
             _onSubmitAction.action
         }
@@ -217,4 +217,17 @@ class NSObservableTextView: NSTextView, NSTextViewDelegate {
     }
 
     var onEdit: ((NSTextView) -> Void)?
+}
+
+private final class TextFieldAction: NSObject {
+    var action: () -> Void
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+        super.init()
+    }
+
+    @objc func run() {
+        action()
+    }
 }
