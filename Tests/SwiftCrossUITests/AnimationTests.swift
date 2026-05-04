@@ -281,6 +281,49 @@ struct AnimationTests {
         #expect(counter.runs == initialBodyRuns + 1)
     }
 
+    @Test("Triggered PhaseAnimator advances through all phases")
+    @MainActor
+    func triggeredPhaseAnimatorAdvancesThroughAllPhases() async throws {
+        let backend = DummyBackend()
+        let window = backend.createWindow(withDefaultSize: nil)
+        let environment = EnvironmentValues(backend: backend)
+            .with(\.window, window)
+
+        func makeView(trigger: Int) -> some View {
+            PhaseAnimator([0, 1, 2], trigger: trigger) { phase in
+                Text("\(phase)")
+            } animation: { _ in
+                .linear(duration: 0.01)
+            }
+        }
+
+        let viewGraph = ViewGraph(
+            for: makeView(trigger: 0),
+            backend: backend,
+            environment: environment
+        )
+        _ = viewGraph.computeLayout(
+            proposedSize: ProposedViewSize(200, 200),
+            environment: environment
+        )
+        viewGraph.commit()
+
+        _ = viewGraph.computeLayout(
+            with: makeView(trigger: 1),
+            proposedSize: ProposedViewSize(200, 200),
+            environment: environment
+        )
+        viewGraph.commit()
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let rootWidget: DummyBackend.Widget = viewGraph.rootNode.widget.into()
+        let textView = try #require(
+            rootWidget.firstWidget(ofType: DummyBackend.TextView.self)
+        )
+        #expect(textView.content == "2")
+    }
+
     @Test("SwiftUI-style animation declarations compile")
     @MainActor
     func swiftUIStyleDeclarationsCompile() {
@@ -404,16 +447,21 @@ private struct AnimationAPICompilationView: View {
                 .keyframeAnimator(initialValue: 0.0, trigger: flag) { content, value in
                     content
                         .offset(x: value, y: 0)
+                        .scaleEffect(x: 1 + value / 100, y: 1, anchor: .topLeading)
                         .blur(radius: value / 20)
+                        .blur(radius: value / 30, opaque: true)
                 } keyframes: { _ in
                     LinearKeyframe(20.0, duration: 0.2)
                     CubicKeyframe(0.0, duration: 0.2)
                 }
         }
+        .transition(.blurReplace)
+        .transition(.blurReplace(.upUp))
         .animation(.spring(duration: 0.3, bounce: 0.2), value: flag)
         .transaction { transaction in
             transaction.isContinuous = true
         }
+        .rotationEffect(.zero)
     }
 }
 
