@@ -10,7 +10,7 @@ import UIKit
 /// state necessary for the toolbar should live in the view itself.
 @available(tvOS, unavailable)
 @available(visionOS, unavailable)
-public protocol ToolbarItem {
+public protocol KeyboardToolbarItem {
     /// The type of bar button item used to represent this item in UIKit.
     associatedtype ItemType: UIBarButtonItem
 
@@ -26,9 +26,9 @@ public protocol ToolbarItem {
 @available(tvOS, unavailable)
 @available(visionOS, unavailable)
 @resultBuilder
-public enum ToolbarBuilder {
+public enum KeyboardToolbarBuilder {
     public enum Component {
-        case expression(any ToolbarItem)
+        case expression(any KeyboardToolbarItem)
         case block([Component])
         case array([Component])
         indirect case optional(Component?)
@@ -37,7 +37,7 @@ public enum ToolbarBuilder {
     }
     public typealias FinalResult = Component
 
-    public static func buildExpression(_ expression: any ToolbarItem) -> Component {
+    public static func buildExpression(_ expression: any KeyboardToolbarItem) -> Component {
         .expression(expression)
     }
 
@@ -64,7 +64,7 @@ public enum ToolbarBuilder {
 
 @available(tvOS, unavailable)
 @available(visionOS, unavailable)
-extension Button: ToolbarItem {
+extension Button: KeyboardToolbarItem {
     public final class ItemType: UIBarButtonItem {
         var callback: @MainActor @Sendable () -> Void
 
@@ -104,7 +104,7 @@ extension Button: ToolbarItem {
 @available(iOS 14, macCatalyst 14, *)
 @available(tvOS, unavailable, introduced: 14)
 @available(visionOS, unavailable)
-extension Spacer: ToolbarItem {
+extension Spacer: KeyboardToolbarItem {
     public func createBarButtonItem(in environment: EnvironmentValues) -> UIBarButtonItem {
         if let minLength, minLength > 0 {
             logger.warning(
@@ -125,7 +125,7 @@ extension Spacer: ToolbarItem {
 
 @available(tvOS, unavailable)
 @available(visionOS, unavailable)
-struct FixedWidthToolbarItem<Base: ToolbarItem>: ToolbarItem {
+struct FixedWidthKeyboardToolbarItem<Base: KeyboardToolbarItem>: KeyboardToolbarItem {
     var base: Base
     var width: Double?
 
@@ -149,7 +149,7 @@ struct FixedWidthToolbarItem<Base: ToolbarItem>: ToolbarItem {
 @available(iOS 14, macCatalyst 14, *)
 @available(tvOS, unavailable, introduced: 14)
 @available(visionOS, unavailable)
-struct FixedWidthSpacerItem: ToolbarItem {
+struct FixedWidthKeyboardSpacerItem: KeyboardToolbarItem {
     var width: Double?
 
     func createBarButtonItem(in environment: EnvironmentValues) -> UIBarButtonItem {
@@ -167,7 +167,7 @@ struct FixedWidthSpacerItem: ToolbarItem {
 
 @available(tvOS, unavailable)
 @available(visionOS, unavailable)
-struct ColoredToolbarItem<Base: ToolbarItem>: ToolbarItem {
+struct ColoredKeyboardToolbarItem<Base: KeyboardToolbarItem>: KeyboardToolbarItem {
     var base: Base
     var color: Color
 
@@ -185,24 +185,24 @@ struct ColoredToolbarItem<Base: ToolbarItem>: ToolbarItem {
 
 @available(tvOS, unavailable)
 @available(visionOS, unavailable)
-extension ToolbarItem {
+extension KeyboardToolbarItem {
     /// A toolbar item with the specified width.
     ///
     /// If `width` is positive, the item will have that exact width. If `width` is zero or
     /// nil, the item will have its natural size.
-    public func frame(width: Double?) -> any ToolbarItem {
+    public func frame(width: Double?) -> any KeyboardToolbarItem {
         if #available(iOS 14, macCatalyst 14, *),
-            self is Spacer || self is FixedWidthSpacerItem
+            self is Spacer || self is FixedWidthKeyboardSpacerItem
         {
-            FixedWidthSpacerItem(width: width)
+            FixedWidthKeyboardSpacerItem(width: width)
         } else {
-            FixedWidthToolbarItem(base: self, width: width)
+            FixedWidthKeyboardToolbarItem(base: self, width: width)
         }
     }
 
     /// A toolbar item with the specified foreground color.
-    public func foregroundColor(_ color: Color) -> some ToolbarItem {
-        ColoredToolbarItem(base: self, color: color)
+    public func foregroundColor(_ color: Color) -> some KeyboardToolbarItem {
+        ColoredKeyboardToolbarItem(base: self, color: color)
     }
 }
 
@@ -223,7 +223,7 @@ final class KeyboardToolbar: UIToolbar {
     var locations: [ToolbarItemLocation: UIBarButtonItem] = [:]
 
     func setItems(
-        _ components: ToolbarBuilder.FinalResult,
+        _ components: KeyboardToolbarBuilder.FinalResult,
         animated: Bool,
         in environment: EnvironmentValues
     ) {
@@ -246,8 +246,8 @@ final class KeyboardToolbar: UIToolbar {
         self.locations = newLocations
     }
 
-    /// Used to open the existential to call ``ToolbarItem/updateBarButtonItem(_:)``.
-    private func updateErasedItem<T: ToolbarItem>(
+    /// Used to open the existential to call ``KeyboardToolbarItem/updateBarButtonItem(_:)``.
+    private func updateErasedItem<T: KeyboardToolbarItem>(
         _ expression: T,
         _ item: UIBarButtonItem,
         in environment: EnvironmentValues
@@ -262,9 +262,9 @@ final class KeyboardToolbar: UIToolbar {
 
     /// DFS on the `component` tree
     private func visitItems(
-        component: ToolbarBuilder.Component,
+        component: KeyboardToolbarBuilder.Component,
         inside container: ToolbarItemLocation?,
-        callback: (ToolbarItemLocation, any ToolbarItem) -> Void
+        callback: (ToolbarItemLocation, any KeyboardToolbarItem) -> Void
     ) {
         switch component {
             case .expression(let expression):
@@ -314,7 +314,7 @@ extension View {
     @available(visionOS, unavailable)
     public func keyboardToolbar(
         animateChanges: Bool = true,
-        @ToolbarBuilder body: @escaping @Sendable @MainActor () -> ToolbarBuilder.FinalResult
+        @KeyboardToolbarBuilder body: @escaping @Sendable @MainActor () -> KeyboardToolbarBuilder.FinalResult
     ) -> some View {
         EnvironmentModifier(self) { environment in
             environment.with(\.updateToolbar) { toolbar, environment in

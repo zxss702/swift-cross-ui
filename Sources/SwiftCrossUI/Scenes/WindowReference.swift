@@ -321,6 +321,18 @@ final class WindowReference<SceneType: WindowingScene>: ViewModelObserver {
             setBehaviors(backend: backend)
         }
 
+        if let backend = backend as? any BackendFeatures.WindowToolbars {
+            func setToolbar<NewBackend: BackendFeatures.WindowToolbars>(backend: NewBackend) {
+                backend.setToolbar(
+                    ofWindow: window as! NewBackend.Window,
+                    to: finalContentResult.preferences.toolbar,
+                    navigationTitle: finalContentResult.preferences.navigationTitle,
+                    environment: environment
+                )
+            }
+            setToolbar(backend: backend)
+        }
+
         // Generally just used to update the window color scheme
         backend.updateWindow(window, environment: environment)
 

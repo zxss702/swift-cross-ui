@@ -155,6 +155,120 @@ struct SwiftCrossUITests: Sendable {
         #expect(ambientColorScheme.value == .dark)
     }
 
+    @Test("Ensure that navigationTitle and toolbar preferences are propagated")
+    @MainActor
+    func testToolbarPreferences() throws {
+        let backend = DummyBackend()
+        let window = backend.createWindow(withDefaultSize: nil)
+        let environment = EnvironmentValues(backend: backend)
+            .with(\.window, window)
+
+        let view = Text("Inbox")
+            .navigationTitle("Inbox")
+            .toolbar {
+                Button("Add") {}
+                ToolbarItem(placement: .navigation) {
+                    Button("Back") {}
+                }
+                Spacer()
+                Divider()
+            }
+
+        let viewGraph = ViewGraph(
+            for: view,
+            backend: backend,
+            environment: environment
+        )
+        let result = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+
+        #expect(result.preferences.navigationTitle == "Inbox")
+
+        let items = result.preferences.toolbar.items
+        #expect(items.count == 4)
+        #expect(items[0].placement == .automatic)
+        #expect(items[1].placement == .navigation)
+        #expect(items[2].placement == .automatic)
+        #expect(items[3].placement == .automatic)
+
+        guard case .button(let addLabel, _) = items[0].content else {
+            Issue.record("Expected first toolbar item to be a button")
+            return
+        }
+        #expect(addLabel == "Add")
+
+        guard case .button(let backLabel, _) = items[1].content else {
+            Issue.record("Expected second toolbar item to be a button")
+            return
+        }
+        #expect(backLabel == "Back")
+
+        guard case .spacer = items[2].content else {
+            Issue.record("Expected third toolbar item to be a spacer")
+            return
+        }
+
+        guard case .separator = items[3].content else {
+            Issue.record("Expected fourth toolbar item to be a separator")
+            return
+        }
+    }
+
+    @Test("Ensure that NavigationStack propagates the visible page preferences")
+    @MainActor
+    func testNavigationStackVisiblePreferences() throws {
+        let backend = DummyBackend()
+        let window = backend.createWindow(withDefaultSize: nil)
+        let environment = EnvironmentValues(backend: backend)
+            .with(\.window, window)
+
+        var path = NavigationPath()
+        path.append("detail")
+        let pathBinding = Binding(
+            get: { path },
+            set: { path = $0 }
+        )
+
+        let view = NavigationStack(path: pathBinding) {
+            Text("Root")
+                .navigationTitle("Root")
+        }
+        .navigationDestination(for: String.self) { value in
+            Text(value)
+                .navigationTitle("Detail")
+                .toolbar {
+                    Button("Done") {}
+                }
+        }
+
+        let viewGraph = ViewGraph(
+            for: view,
+            backend: backend,
+            environment: environment
+        )
+
+        var result = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+        viewGraph.commit()
+
+        #expect(result.preferences.navigationTitle == "Detail")
+        #expect(result.preferences.toolbar.items.count == 1)
+
+        path.removeAll()
+        result = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+        viewGraph.commit()
+
+        #expect(result.preferences.navigationTitle == "Root")
+        #expect(result.preferences.toolbar.items.isEmpty)
+    }
+
     #if canImport(AppKitBackend)
         @Test("Ensure that a basic view has the expected dimensions under AppKitBackend")
         @MainActor
