@@ -1432,6 +1432,32 @@ public final class AppKitBackend: FullAppBackend {
     }
 }
 
+extension AppKitBackend: BackendFeatures.WindowToolbars {
+    public func setToolbar(
+        ofWindow window: Window,
+        to toolbar: ResolvedToolbar,
+        navigationTitle: String?,
+        environment: EnvironmentValues
+    ) {
+        if let navigationTitle {
+            window.title = navigationTitle
+        }
+
+        guard !toolbar.items.isEmpty else {
+            window.toolbar = nil
+            window.toolbarDelegate = nil
+            return
+        }
+
+        let delegate = AppKitToolbarDelegate(toolbar: toolbar)
+        let nsToolbar = NSToolbar(identifier: "SwiftCrossUI.Toolbar")
+        nsToolbar.displayMode = .default
+        nsToolbar.delegate = delegate
+        window.toolbar = nsToolbar
+        window.toolbarDelegate = delegate
+    }
+}
+
 final class NSCustomMenuItem: NSMenuItem {
     /// This property's only purpose is to keep a strong reference to the wrapped
     /// action so that it sticks around for long enough to be useful.
@@ -1446,16 +1472,75 @@ final class NSCustomMenuItem: NSMenuItem {
 // TODO: Update all controls to use this style of action passing, seems way nicer
 //   than the existing associated keys based approach. And probably more efficient too.
 // Source: https://stackoverflow.com/a/36983811
+@MainActor
 final class Action: NSObject {
-    var action: () -> Void
+    var action: @MainActor () -> Void
 
-    init(_ action: @escaping () -> Void) {
+    init(_ action: @escaping @MainActor () -> Void) {
         self.action = action
         super.init()
     }
 
     @objc func run() {
         action()
+    }
+}
+
+final class NSCustomToolbarItem: NSToolbarItem {
+    var actionWrapper: Action?
+}
+
+@MainActor
+final class AppKitToolbarDelegate: NSObject, NSToolbarDelegate {
+    private let toolbar: ResolvedToolbar
+    private var identifiers: [NSToolbarItem.Identifier] = []
+    private var itemsByIdentifier: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
+
+    init(toolbar: ResolvedToolbar) {
+        self.toolbar = toolbar
+        super.init()
+        buildItems()
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        identifiers
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        identifiers + [.space, .flexibleSpace]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        itemsByIdentifier[itemIdentifier]
+    }
+
+    private func buildItems() {
+        for (index, item) in toolbar.items.enumerated() {
+            switch item.content {
+                case .button(let label, let action):
+                    let identifier = NSToolbarItem.Identifier("SwiftCrossUI.ToolbarItem.\(index)")
+                    let toolbarItem = NSCustomToolbarItem(itemIdentifier: identifier)
+                    toolbarItem.label = label
+                    toolbarItem.paletteLabel = label
+                    toolbarItem.toolTip = label
+                    let wrappedAction = Action {
+                        action()
+                    }
+                    toolbarItem.actionWrapper = wrappedAction
+                    toolbarItem.target = wrappedAction
+                    toolbarItem.action = #selector(wrappedAction.run)
+                    identifiers.append(identifier)
+                    itemsByIdentifier[identifier] = toolbarItem
+                case .spacer:
+                    identifiers.append(.flexibleSpace)
+                case .separator:
+                    identifiers.append(.space)
+            }
+        }
     }
 }
 
@@ -1690,6 +1775,7 @@ class NSSplitViewResizingDelegate: NSObject, NSSplitViewDelegate {
 public class NSCustomWindow: NSWindow {
     var customDelegate = Delegate()
     var persistentUndoManager = UndoManager()
+    var toolbarDelegate: AppKitToolbarDelegate?
 
     /// A reference to the sheet currently presented on top of this window, if any.
     /// If the sheet itself has another sheet presented on top of it, then that doubly

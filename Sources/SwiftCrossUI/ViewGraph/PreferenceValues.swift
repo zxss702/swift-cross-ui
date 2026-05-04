@@ -8,6 +8,8 @@ public struct PreferenceValues: Sendable {
         presentationCornerRadius: nil,
         presentationDragIndicatorVisibility: nil,
         presentationBackground: nil,
+        navigationTitle: nil,
+        toolbar: .empty,
         interactiveDismissDisabled: nil,
         windowDismissBehavior: nil,
         preferredWindowMinimizeBehavior: nil,
@@ -33,6 +35,12 @@ public struct PreferenceValues: Sendable {
 
     /// Sets the preferred color scheme for the nearest enclosing presentation.
     public var preferredColorScheme: ColorScheme?
+
+    /// The title to show in the nearest native navigation container.
+    public var navigationTitle: String?
+
+    /// Toolbar items to show in the nearest native toolbar consumer.
+    public var toolbar: ResolvedToolbar
 
     /// Controls whether the user can interactively dismiss enclosing sheets.
     public var interactiveDismissDisabled: Bool?
@@ -83,6 +91,8 @@ extension PreferenceValues {
             children.compactMap(\.presentationDragIndicatorVisibility).first
         presentationBackground = children.compactMap(\.presentationBackground).first
         preferredColorScheme = children.compactMap(\.preferredColorScheme).first
+        navigationTitle = children.compactMap(\.navigationTitle).first
+        toolbar = children.map(\.toolbar).reduce(.empty) { $0.overlayed(with: $1) }
         interactiveDismissDisabled = children.compactMap(\.interactiveDismissDisabled).first
 
         windowDismissBehavior = children.compactMap(\.windowDismissBehavior).first
