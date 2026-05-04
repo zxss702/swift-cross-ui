@@ -180,7 +180,7 @@ private class NSObservableTextField: NSTextField {
 
     var onEdit: ((NSTextField) -> Void)?
     var _onSubmitAction = Action({})
-    var onSubmit: () -> Void {
+    var onSubmit: @MainActor () -> Void {
         get {
             _onSubmitAction.action
         }
@@ -199,7 +199,7 @@ private class NSObservableSecureTextField: NSSecureTextField {
 
     var onEdit: ((NSSecureTextField) -> Void)?
     var _onSubmitAction = Action({})
-    var onSubmit: () -> Void {
+    var onSubmit: @MainActor () -> Void {
         get {
             _onSubmitAction.action
         }
