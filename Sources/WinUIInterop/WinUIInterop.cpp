@@ -13,6 +13,10 @@
 #include <wrl/client.h>
 #include <wrl/implements.h>
 
+// Swift cannot currently reach the WinUI composition effect APIs needed for
+// element blur through the generated wrappers, so this file declares the narrow
+// ABI surface used by the C entry points below.
+
 struct __x_ABI_CWindows_CFoundation_CNumerics_CVector2 {
     FLOAT X;
     FLOAT Y;
