@@ -29,7 +29,7 @@ public struct TextLayoutFragment: Hashable, Sendable {
 /// app lifecycle methods. These implementations will fatally crash when called
 /// and are simply intended to allow incremental implementation of backends,
 /// not a production-ready fallback for views that cannot be represented by a
-/// given backend. The methods you need to implemented up-front (which don't
+/// given backend. The methods you need to implement up-front (which don't
 /// have default implementations) are: ``AppBackend/createWindow(withDefaultSize:)``,
 /// ``AppBackend/setTitle(ofWindow:to:)``,
 /// ``AppBackend/setBehaviors(ofWindow:closable:minimizable:resizable:)``,
@@ -91,7 +91,7 @@ public protocol AppBackend: Sendable {
     /// total amount added along the vertical axis. It's a recommendation by the
     /// backend that SwiftCrossUI won't necessarily follow in all cases.
     var defaultTableCellVerticalPadding: Int { get }
-    /// The default amount of padding used when a user uses the``View/padding(_:_:)``
+    /// The default amount of padding used when a user uses the ``View/padding(_:_:)``
     /// modifier.
     var defaultPaddingAmount: Int { get }
     /// Gets the layout width of a backend's scroll bars.
@@ -187,7 +187,7 @@ public protocol AppBackend: Sendable {
     /// application's root window the first time its called, and only create new
     /// windows on subsequent invocations.
     ///
-    /// A window's content size has precendence over the default size. The
+    /// A window's content size has precedence over the default size. The
     /// window should always be at least the size of its content.
     ///
     /// - Parameter defaultSize: The default size of the window. This is only a
