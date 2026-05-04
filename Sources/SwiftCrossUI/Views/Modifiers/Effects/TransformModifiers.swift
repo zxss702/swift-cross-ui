@@ -11,9 +11,18 @@ extension View {
 
     /// Scales this view by the given amount.
     public func scaleEffect(_ scale: Double, anchor: UnitPoint = .center) -> some View {
+        scaleEffect(x: scale, y: scale, anchor: anchor)
+    }
+
+    /// Scales this view by the given horizontal and vertical amounts.
+    public func scaleEffect(
+        x: Double = 1,
+        y: Double = 1,
+        anchor: UnitPoint = .center
+    ) -> some View {
         TransformEffectView(
             content: self,
-            transform: .scaling(by: scale),
+            transform: .scaling(x: x, y: y),
             anchor: anchor
         )
     }
@@ -33,8 +42,8 @@ extension View {
     }
 
     /// Applies a blur effect to this view.
-    public func blur(radius: Double) -> some View {
-        BlurEffectView(content: self, radius: radius)
+    public func blur(radius: Double, opaque: Bool = false) -> some View {
+        BlurEffectView(content: self, radius: radius, opaque: opaque)
     }
 
     /// Controls this view's z ordering in containers that support it.
@@ -222,10 +231,12 @@ struct BlurEffectView<Content: View>: TypeSafeView {
 
     var body: TupleView1<Content>
     var radius: Double
+    var opaque: Bool
 
-    init(content: Content, radius: Double) {
+    init(content: Content, radius: Double, opaque: Bool) {
         body = TupleView1(content)
         self.radius = radius
+        self.opaque = opaque
     }
 
     func children<Backend: AppBackend>(
@@ -281,6 +292,9 @@ struct BlurEffectView<Content: View>: TypeSafeView {
         ) { transaction in
             environment.requestRenderFrame(transaction)
         }
+        // Kept for SwiftUI source compatibility. Current backend blur APIs do
+        // not expose an opaque edge-sampling mode.
+        _ = opaque
         backend.setBlur(of: widget, radius: presentation)
     }
 }

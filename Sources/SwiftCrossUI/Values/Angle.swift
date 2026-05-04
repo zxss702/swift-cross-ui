@@ -1,5 +1,7 @@
 /// An angle measured in radians.
 public struct Angle: Hashable, Sendable {
+    public static let zero = Self(radians: 0)
+
     public var radians: Double
 
     public var degrees: Double {
@@ -22,4 +24,3 @@ public struct Angle: Hashable, Sendable {
         Self(degrees: degrees)
     }
 }
-
