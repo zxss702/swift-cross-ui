@@ -40,12 +40,12 @@ public struct NavigationPath {
     private var storage = Storage()
 
     /// Indicates whether this path is empty.
-    var isEmpty: Bool {
+    public var isEmpty: Bool {
         storage.encodedEntries.isEmpty && storage.path.isEmpty
     }
 
     /// The number of elements in the path.
-    var count: Int {
+    public var count: Int {
         storage.encodedEntries.count + storage.path.count
     }
 
@@ -57,6 +57,16 @@ public struct NavigationPath {
     /// - Parameter component: The component to append.
     public mutating func append(_ component: some Codable) {
         storage.path.append(component)
+    }
+
+    /// Appends the contents of a sequence to the end of the path.
+    ///
+    /// - Parameter components: The components to append.
+    public mutating func append<S: Sequence>(contentsOf components: S)
+    where S.Element: Codable {
+        for component in components {
+            append(component)
+        }
     }
 
     /// Removes values from the end of this path.

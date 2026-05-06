@@ -123,7 +123,7 @@ struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {
             let preferences = result.preferences
             backend.updateSheet(
                 sheet,
-                window: window as! NewBackend.Window,
+                surface: window as! NewBackend.Surface,
                 // We intentionally use the outer environment rather than
                 // sheetEnvironment here, because this is meant to be the sheet's
                 // environment, not that of its content.
@@ -141,7 +141,7 @@ struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {
             let parentSheet = environment.sheet.map { $0 as! NewBackend.Sheet }
             backend.presentSheet(
                 sheet,
-                window: window as! NewBackend.Window,
+                surface: window as! NewBackend.Surface,
                 parentSheet: parentSheet
             )
             children.sheet = sheet
@@ -150,7 +150,7 @@ struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {
         } else if !isPresented.wrappedValue && children.sheet != nil {
             backend.dismissSheet(
                 children.sheet as! NewBackend.Sheet,
-                window: children.window! as! NewBackend.Window,
+                surface: children.window! as! NewBackend.Surface,
                 parentSheet: children.parentSheet.map { $0 as! NewBackend.Sheet }
             )
             children.sheet = nil

@@ -30,10 +30,10 @@ extension UIKitBackend {
 
     public func showAlert(
         _ alert: Alert,
-        window: Window?,
+        surface: Surface?,
         responseHandler handleResponse: @escaping (Int) -> Void
     ) {
-        guard let window = window ?? Self.mainWindow else {
+        guard let surface = surface ?? Self.mainWindow else {
             assertionFailure("Could not find window in which to display alert")
             return
         }
@@ -41,10 +41,10 @@ extension UIKitBackend {
         for (index, action) in alert.actions.enumerated() {
             (action as! CustomAlertAction).handler = { handleResponse(index) }
         }
-        window.rootViewController!.present(alert, animated: true)
+        surface.rootViewController!.present(alert, animated: true)
     }
 
-    public func dismissAlert(_ alert: Alert, window: Window?) {
+    public func dismissAlert(_ alert: Alert, surface: Surface?) {
         alert.dismiss(animated: true)
     }
 }

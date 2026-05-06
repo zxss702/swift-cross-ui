@@ -69,7 +69,7 @@ extension BackendFeatures {
 ///      compiler likely won't help you here because this struct is `private`.
 ///   4. Write `todo()` in the bodies of every method and property.
 private struct BaseStubsTest: BackendFeatures.BaseStubs {
-    struct Window {}
+    struct Surface {}
     struct Widget {}
 }
 #endif
@@ -413,36 +413,32 @@ extension BackendFeatures.BaseStubs {
         todo()
     }
 
-    public func createWindow(withDefaultSize defaultSize: SIMD2<Int>?) -> Window {
+    public func createSurface(withDefaultSize defaultSize: SIMD2<Int>?) -> Surface {
         todo()
     }
 
-    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
+    public func updateSurface(_ surface: Surface, environment: EnvironmentValues) {
         todo()
     }
 
-    public func setTitle(ofWindow window: Window, to title: String) {
-        todo()
-    }
-    
-    public func setChild(ofWindow window: Window, to child: Widget) {
+    public func setChild(ofSurface surface: Surface, to child: Widget) {
         todo()
     }
 
-    public func size(ofWindow window: Window) -> SIMD2<Int> {
+    public func size(ofSurface surface: Surface) -> SIMD2<Int> {
         todo()
     }
 
-    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
+    public func isSurfaceProgrammaticallyResizable(_ surface: Surface) -> Bool {
         todo()
     }
 
-    public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
+    public func setSize(ofSurface surface: Surface, to newSize: SIMD2<Int>) {
         todo()
     }
 
     public func setSizeLimits(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
@@ -450,26 +446,36 @@ extension BackendFeatures.BaseStubs {
     }
 
     public func setResizeHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping (SIMD2<Int>) -> Void
     ) {
         todo()
     }
 
-    public func show(window: Window) {
+    public func show(surface: Surface) {
         todo()
     }
 
-    public func activate(window: Window) {
+    public func close(surface: Surface) {
         todo()
     }
 
-    public func computeWindowEnvironment(window: Window, rootEnvironment: EnvironmentValues) -> EnvironmentValues {
+    public func setCloseHandler(
+        ofSurface surface: Surface,
+        to action: @escaping () -> Void
+    ) {
         todo()
     }
 
-    public func setWindowEnvironmentChangeHandler(
-        of window: Window,
+    public func computeSurfaceEnvironment(
+        surface: Surface,
+        rootEnvironment: EnvironmentValues
+    ) -> EnvironmentValues {
+        todo()
+    }
+
+    public func setSurfaceEnvironmentChangeHandler(
+        of surface: Surface,
         to action: @escaping @Sendable @MainActor () -> Void
     ) {
         todo()

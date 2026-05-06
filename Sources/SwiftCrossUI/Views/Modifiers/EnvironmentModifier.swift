@@ -1,4 +1,4 @@
-package struct EnvironmentModifier<Child: View>: View {
+package struct EnvironmentModifier<Child: View>: View, ObservationTrackingView {
     package var body: TupleView1<Child>
     var modification: (EnvironmentValues) -> EnvironmentValues
 
@@ -15,7 +15,7 @@ package struct EnvironmentModifier<Child: View>: View {
         body.children(
             backend: backend,
             snapshots: snapshots,
-            environment: modification(environment)
+            environment: modifiedEnvironment(environment)
         )
     }
 
@@ -30,7 +30,7 @@ package struct EnvironmentModifier<Child: View>: View {
             widget,
             children: children,
             proposedSize: proposedSize,
-            environment: modification(environment),
+            environment: modifiedEnvironment(environment),
             backend: backend
         )
     }
@@ -46,9 +46,17 @@ package struct EnvironmentModifier<Child: View>: View {
             widget,
             children: children,
             layout: layout,
-            environment: modification(environment),
+            environment: modifiedEnvironment(environment),
             backend: backend
         )
+    }
+
+    func readObservationDependencies(in environment: EnvironmentValues) {
+        _ = modifiedEnvironment(environment)
+    }
+
+    private func modifiedEnvironment(_ environment: EnvironmentValues) -> EnvironmentValues {
+        modification(environment)
     }
 }
 

@@ -10,7 +10,7 @@ extension App {
 }
 
 public final class AppKitBackend: FullAppBackend {
-    public typealias Window = NSCustomWindow
+    public typealias Surface = NSCustomWindow
     public typealias Widget = NSView
     public typealias Alert = NSAlert
 
@@ -59,7 +59,7 @@ public final class AppKitBackend: FullAppBackend {
         NSApplication.shared.run()
     }
 
-    public func createWindow(withDefaultSize defaultSize: SIMD2<Int>?) -> Window {
+    public func createSurface(withDefaultSize defaultSize: SIMD2<Int>?) -> Surface {
         // For bundled apps, the default activation policy is `regular`, but for unbundled
         // apps without an Info.plist the default is `prohibited` -- i.e. the app can't
         // create windows. We override that here.
@@ -86,33 +86,33 @@ public final class AppKitBackend: FullAppBackend {
         return window
     }
 
-    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
-        window.appearance = environment.colorScheme.nsAppearance
+    public func updateSurface(_ surface: Surface, environment: EnvironmentValues) {
+        surface.appearance = environment.colorScheme.nsAppearance
     }
 
-    public func size(ofWindow window: Window) -> SIMD2<Int> {
-        let contentRect = window.contentRect(forFrameRect: window.frame)
+    public func size(ofSurface surface: Surface) -> SIMD2<Int> {
+        let contentRect = surface.contentRect(forFrameRect: surface.frame)
         return SIMD2(
             Int(contentRect.width.rounded(.towardZero)),
             Int(contentRect.height.rounded(.towardZero))
         )
     }
 
-    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
-        !window.styleMask.contains(.fullScreen)
+    public func isSurfaceProgrammaticallyResizable(_ surface: Surface) -> Bool {
+        !surface.styleMask.contains(.fullScreen)
     }
 
-    public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
-        window.setContentSize(NSSize(width: newSize.x, height: newSize.y))
+    public func setSize(ofSurface surface: Surface, to newSize: SIMD2<Int>) {
+        surface.setContentSize(NSSize(width: newSize.x, height: newSize.y))
     }
 
     public func setSizeLimits(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
-        window.contentMinSize = CGSize(width: minimumSize.x, height: minimumSize.y)
-        window.contentMaxSize =
+        surface.contentMinSize = CGSize(width: minimumSize.x, height: minimumSize.y)
+        surface.contentMaxSize =
             if let maximumSize {
                 CGSize(width: maximumSize.x, height: maximumSize.y)
             } else {
@@ -121,51 +121,22 @@ public final class AppKitBackend: FullAppBackend {
     }
 
     public func setResizeHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping (SIMD2<Int>) -> Void
     ) {
-        window.customDelegate.setResizeHandler(action)
+        surface.customDelegate.setResizeHandler(action)
     }
 
-    public func setTitle(ofWindow window: Window, to title: String) {
-        window.title = title
+    public func setTitle(ofSurface surface: Surface, to title: String) {
+        surface.title = title
     }
 
-    public func setBehaviors(
-        ofWindow window: Window,
-        closable: Bool,
-        minimizable: Bool,
-        resizable: Bool
-    ) {
-        if closable {
-            window.styleMask.insert(.closable)
-        } else {
-            window.styleMask.remove(.closable)
-        }
-
-        if minimizable {
-            window.styleMask.insert(.miniaturizable)
-        } else {
-            window.styleMask.remove(.miniaturizable)
-        }
-
-        if resizable {
-            window.styleMask.insert(.resizable)
-        } else {
-            window.styleMask.remove(.resizable)
-        }
+    public func setChild(ofSurface surface: Surface, to child: Widget) {
+        surface.contentView = child
     }
 
-    public func setChild(ofWindow window: Window, to child: Widget) {
-        window.contentView = child
-    }
-
-    public func show(window: Window) {
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    public func activate(window: Window) {
-        window.makeKeyAndOrderFront(nil)
+    public func show(surface: Surface) {
+        surface.makeKeyAndOrderFront(nil)
     }
 
     public func setApplicationMenu(
@@ -177,15 +148,15 @@ public final class AppKitBackend: FullAppBackend {
         })
     }
 
-    public func close(window: Window) {
-        window.close()
+    public func close(surface: Surface) {
+        surface.close()
     }
 
     public func setCloseHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping () -> Void
     ) {
-        window.customDelegate.setCloseHandler(action)
+        surface.customDelegate.setCloseHandler(action)
     }
 
     public func openExternalURL(_ url: URL) throws {
@@ -324,58 +295,6 @@ public final class AppKitBackend: FullAppBackend {
         }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor in
-                action()
-            }
-        }
-    }
-
-    public func computeWindowEnvironment(
-        window: Window,
-        rootEnvironment: EnvironmentValues
-    ) -> EnvironmentValues {
-        window.lastBackingScaleFactor = window.backingScaleFactor
-
-        return rootEnvironment
-            .with(\.windowScaleFactor, window.backingScaleFactor)
-            .with(\.scenePhase, window.isKeyWindow ? .active : .inactive)
-    }
-
-    public func setWindowEnvironmentChangeHandler(
-        of window: Window,
-        to action: @escaping @Sendable @MainActor () -> Void
-    ) {
-        // For updating window scale factor
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didChangeBackingPropertiesNotification,
-            object: window,
-            queue: .main
-        ) { notification in
-            Task { @MainActor in
-                let backingScaleFactorChanged =
-                    window.lastBackingScaleFactor != window.backingScaleFactor
-
-                if backingScaleFactorChanged {
-                    action()
-                }
-            }
-        }
-
-        // For updating views that rely on `scenePhase`
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor in
-                action()
-            }
-        }
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
             object: nil,
             queue: .main
         ) { _ in
@@ -1243,7 +1162,7 @@ public final class AppKitBackend: FullAppBackend {
 
     public func showAlert(
         _ alert: Alert,
-        window: Window?,
+        surface: Surface?,
         responseHandler handleResponse: @escaping (Int) -> Void
     ) {
         let completionHandler: (NSApplication.ModalResponse) -> Void = { response in
@@ -1261,9 +1180,9 @@ public final class AppKitBackend: FullAppBackend {
             handleResponse(action)
         }
 
-        if let window {
+        if let surface {
             alert.beginSheetModal(
-                for: window,
+                for: surface,
                 completionHandler: completionHandler
             )
         } else {
@@ -1272,9 +1191,9 @@ public final class AppKitBackend: FullAppBackend {
         }
     }
 
-    public func dismissAlert(_ alert: Alert, window: Window?) {
-        if let window {
-            window.endSheet(alert.window)
+    public func dismissAlert(_ alert: Alert, surface: Surface?) {
+        if let surface {
+            surface.endSheet(alert.window)
         } else {
             NSApplication.shared.stopModal()
         }
@@ -1283,7 +1202,7 @@ public final class AppKitBackend: FullAppBackend {
     public func showOpenDialog(
         fileDialogOptions: FileDialogOptions,
         openDialogOptions: OpenDialogOptions,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<[URL]>) -> Void
     ) {
         let panel = NSOpenPanel()
@@ -1311,8 +1230,8 @@ public final class AppKitBackend: FullAppBackend {
             }
         }
 
-        if let window {
-            panel.beginSheetModal(for: window, completionHandler: handleResponse)
+        if let surface {
+            panel.beginSheetModal(for: surface, completionHandler: handleResponse)
         } else {
             let response = panel.runModal()
             handleResponse(response)
@@ -1322,7 +1241,7 @@ public final class AppKitBackend: FullAppBackend {
     public func showSaveDialog(
         fileDialogOptions: FileDialogOptions,
         saveDialogOptions: SaveDialogOptions,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<URL>) -> Void
     ) {
         let panel = NSSavePanel()
@@ -1349,8 +1268,8 @@ public final class AppKitBackend: FullAppBackend {
             }
         }
 
-        if let window {
-            panel.beginSheetModal(for: window, completionHandler: handleResponse)
+        if let surface {
+            panel.beginSheetModal(for: surface, completionHandler: handleResponse)
         } else {
             let response = panel.runModal()
             handleResponse(response)
@@ -1432,6 +1351,35 @@ public final class AppKitBackend: FullAppBackend {
     }
 }
 
+<<<<<<< Updated upstream
+=======
+extension AppKitBackend: BackendFeatures.WindowToolbars {
+    public func setToolbar(
+        ofSurface surface: Surface,
+        to toolbar: ResolvedToolbar,
+        navigationTitle: String?,
+        environment: EnvironmentValues
+    ) {
+        if let navigationTitle {
+            surface.title = navigationTitle
+        }
+
+        guard !toolbar.items.isEmpty else {
+            surface.toolbar = nil
+            surface.toolbarDelegate = nil
+            return
+        }
+
+        let delegate = AppKitToolbarDelegate(toolbar: toolbar)
+        let nsToolbar = NSToolbar(identifier: "SwiftCrossUI.Toolbar")
+        nsToolbar.displayMode = .default
+        nsToolbar.delegate = delegate
+        surface.toolbar = nsToolbar
+        surface.toolbarDelegate = delegate
+    }
+}
+
+>>>>>>> Stashed changes
 final class NSCustomMenuItem: NSMenuItem {
     /// This property's only purpose is to keep a strong reference to the wrapped
     /// action so that it sticks around for long enough to be useful.
@@ -1459,6 +1407,75 @@ final class Action: NSObject {
     }
 }
 
+<<<<<<< Updated upstream
+=======
+final class NSCustomToolbarItem: NSToolbarItem {
+    var actionWrapper: Action?
+}
+
+@MainActor
+final class AppKitToolbarDelegate: NSObject, NSToolbarDelegate {
+    private let toolbar: ResolvedToolbar
+    private var identifiers: [NSToolbarItem.Identifier] = []
+    private var itemsByIdentifier: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
+
+    init(toolbar: ResolvedToolbar) {
+        self.toolbar = toolbar
+        super.init()
+        buildItems()
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        identifiers
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        identifiers + [.space, .flexibleSpace]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        itemsByIdentifier[itemIdentifier]
+    }
+
+    private func buildItems() {
+        for (index, item) in toolbar.items.enumerated() {
+            switch item.content {
+                case .button(let label, let action):
+                    let identifier = NSToolbarItem.Identifier("SwiftCrossUI.ToolbarItem.\(index)")
+                    let toolbarItem = NSCustomToolbarItem(itemIdentifier: identifier)
+                    toolbarItem.label = label
+                    toolbarItem.paletteLabel = label
+                    toolbarItem.toolTip = label
+                    let wrappedAction = Action {
+                        action()
+                    }
+                    toolbarItem.actionWrapper = wrappedAction
+                    toolbarItem.target = wrappedAction
+                    toolbarItem.action = #selector(wrappedAction.run)
+                    identifiers.append(identifier)
+                    itemsByIdentifier[identifier] = toolbarItem
+                case .text(let text):
+                    let identifier = NSToolbarItem.Identifier("SwiftCrossUI.ToolbarItem.\(index)")
+                    let toolbarItem = NSToolbarItem(itemIdentifier: identifier)
+                    toolbarItem.label = text
+                    toolbarItem.paletteLabel = text
+                    toolbarItem.toolTip = text
+                    identifiers.append(identifier)
+                    itemsByIdentifier[identifier] = toolbarItem
+                case .spacer:
+                    identifiers.append(.flexibleSpace)
+                case .separator:
+                    identifiers.append(.space)
+            }
+        }
+    }
+}
+
+>>>>>>> Stashed changes
 class NSCustomTableView: NSTableView {
     var customDelegate = NSCustomTableViewDelegate()
 }

@@ -1,11 +1,12 @@
-// TODO: This documentation could probably be clarified a bit more (potentially with
-//   some practical examples).
 /// A navigation primitive that appends a value to the current navigation path on click.
 ///
-/// Unlike Apple's SwiftUI API, a `NavigationLink` can be outside of a `NavigationStack`
-/// as long as they share the same `NavigationPath`.
+/// A link can use the nearest enclosing ``NavigationStack`` automatically, or
+/// it can append to an explicit ``NavigationPath`` binding.
 public struct NavigationLink: View {
+    @Environment(\.navigationPathBinding) private var environmentPath
+
     public var body: some View {
+        let path = resolvedPath
         Button(label) {
             path.wrappedValue.append(value)
         }
@@ -16,11 +17,23 @@ public struct NavigationLink: View {
     /// The value to append to the navigation path when clicked.
     private let value: any Codable
     /// The navigation path to append to when clicked.
-    private let path: Binding<NavigationPath>
+    private let explicitPath: Binding<NavigationPath>?
+
+    /// Creates a navigation link that presents the view corresponding to a
+    /// value in the nearest enclosing ``NavigationStack``.
+    ///
+    /// - Parameters:
+    ///   - label: The label to display on the button.
+    ///   - value: The value to append to the current navigation path when clicked.
+    public init(_ label: String, value: some Codable) {
+        self.label = label
+        self.value = value
+        self.explicitPath = nil
+    }
 
     /// Creates a navigation link that presents the view corresponding to a value.
-    /// The link is handled by whatever ``NavigationStack`` is sharing the same
-    /// navigation path.
+    /// The link is handled by whichever ``NavigationStack`` is sharing the
+    /// supplied navigation path.
     ///
     /// - Parameters:
     ///   - label: The label to display on the button.
@@ -29,6 +42,18 @@ public struct NavigationLink: View {
     public init(_ label: String, value: some Codable, path: Binding<NavigationPath>) {
         self.label = label
         self.value = value
-        self.path = path
+        self.explicitPath = path
+    }
+
+    private var resolvedPath: Binding<NavigationPath> {
+        guard let path = explicitPath ?? environmentPath else {
+            fatalError(
+                """
+                NavigationLink requires either an explicit path binding or an \
+                enclosing NavigationStack.
+                """
+            )
+        }
+        return path
     }
 }

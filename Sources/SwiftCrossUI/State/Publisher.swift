@@ -10,6 +10,15 @@ public class Publisher {
     /// Human-readable tag for debugging purposes.
     private var tag: String?
 
+    /// Protects `nextObservationId` and `observations` against data races.
+    private let lock = NSLock()
+
+    private func withLock<T>(_ action: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return action()
+    }
+
     /// We guard this against data races, with `serialUpdateHandlingQueue`, and
     /// with our lives.
     private class UpdateStatistics: @unchecked Sendable {
@@ -32,20 +41,28 @@ public class Publisher {
 
     /// Publishes a change to all observers serially on the current thread.
     public func send() {
-        for observation in self.observations.values {
+        let observations = withLock {
+            self.observations
+        }
+        for observation in observations.values {
             observation()
         }
     }
 
     /// Registers a handler to observe future events.
     public func observe(with closure: @escaping () -> Void) -> Cancellable {
-        let id = nextObservationId
-        observations[id] = closure
-        nextObservationId += 1
+        let id = withLock {
+            let id = nextObservationId
+            observations[id] = closure
+            nextObservationId += 1
+            return id
+        }
 
         return Cancellable { [weak self] in
             guard let self else { return }
-            self.observations[id] = nil
+            self.withLock {
+                self.observations[id] = nil
+            }
         }
         .tag(with: tag)
     }

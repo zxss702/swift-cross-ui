@@ -9,6 +9,11 @@
 @MainActor
 var updaterCache: [ObjectIdentifier: Any] = [:]
 
+/// Stores the indexes of dynamic property children for types that fall back to
+/// Mirror-based updates.
+@MainActor
+var fallbackPropertyIndexesCache: [ObjectIdentifier: [Int]] = [:]
+
 /// A helper for updating the dynamic properties of a stateful struct (e.g.
 /// a struct conforming to ``View`` or ``App``).
 ///
@@ -101,6 +106,7 @@ struct DynamicPropertyUpdater<Base> {
     }
 
     /// Updates each dynamic property of the given value.
+    @MainActor
     func update(_ value: Base, with environment: EnvironmentValues, previousValue: Base?) {
         guard let propertyUpdaters else {
             // Fall back to our old dynamic property updating approach which involves a lot of
@@ -140,34 +146,57 @@ struct DynamicPropertyUpdater<Base> {
 
     /// Updates the dynamic properties of a value given a previous instance of the
     /// type (if one exists) and the current environment.
+    @MainActor
     private static func updateFallback<T>(
         of value: T,
         previousValue: T?,
         environment: EnvironmentValues
     ) {
+        let typeId = ObjectIdentifier(T.self)
+
         let newMirror = Mirror(reflecting: value)
-        let previousMirror = previousValue.map(Mirror.init(reflecting:))
-        if let previousChildren = previousMirror?.children {
-            let propertySequence = zip(newMirror.children, previousChildren)
-            for (newProperty, previousProperty) in propertySequence {
-                guard
-                    let newValue = newProperty.value as? any DynamicProperty,
-                    let previousValue = previousProperty.value as? any DynamicProperty
+        let newChildren = Array(newMirror.children)
+
+        let propertyIndexes: [Int]
+        if let cached = fallbackPropertyIndexesCache[typeId] {
+            propertyIndexes = cached
+        } else {
+            var indexes: [Int] = []
+            for (index, child) in newChildren.enumerated() {
+                if child.value is any DynamicProperty {
+                    indexes.append(index)
+                }
+            }
+            propertyIndexes = indexes
+            fallbackPropertyIndexesCache[typeId] = indexes
+        }
+
+        if let previousValue {
+            let previousChildren = Array(Mirror(reflecting: previousValue).children)
+            for index in propertyIndexes {
+                guard index < newChildren.count, index < previousChildren.count else {
+                    continue
+                }
+                guard let newValue = newChildren[index].value as? any DynamicProperty,
+                      let prevValue = previousChildren[index].value as? any DynamicProperty
                 else {
                     continue
                 }
 
                 updateDynamicPropertyFallback(
                     newProperty: newValue,
-                    previousProperty: previousValue,
+                    previousProperty: prevValue,
                     environment: environment,
                     enclosingTypeName: "\(T.self)",
-                    propertyName: newProperty.label
+                    propertyName: newChildren[index].label
                 )
             }
         } else {
-            for property in newMirror.children {
-                guard let newValue = property.value as? any DynamicProperty else {
+            for index in propertyIndexes {
+                guard index < newChildren.count else {
+                    continue
+                }
+                guard let newValue = newChildren[index].value as? any DynamicProperty else {
                     continue
                 }
 
@@ -176,7 +205,7 @@ struct DynamicPropertyUpdater<Base> {
                     previousProperty: nil,
                     environment: environment,
                     enclosingTypeName: "\(T.self)",
-                    propertyName: property.label
+                    propertyName: newChildren[index].label
                 )
             }
         }

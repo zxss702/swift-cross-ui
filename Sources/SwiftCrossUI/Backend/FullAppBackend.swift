@@ -21,7 +21,6 @@
 /// - ``BackendFeatures/Tooltips``
 /// - ``BackendFeatures/Colors``
 /// - ``BackendFeatures/DatePickers``
-/// - ``BackendFeatures/Windowing``
 public typealias FullAppBackend =
     BaseAppBackend
     & BackendFeatures.MenuButtons
@@ -40,7 +39,6 @@ public typealias FullAppBackend =
     & BackendFeatures.Tooltips
     & BackendFeatures.Colors
     & BackendFeatures.DatePickers
-    & BackendFeatures.Windowing
 
 /// A typealias for ``FullAppBackend``.
 ///

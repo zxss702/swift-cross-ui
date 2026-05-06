@@ -5,7 +5,7 @@ extension AppKitBackend {
     public typealias Sheet = NSCustomSheet
 
     public func createSheet(content: NSView) -> NSCustomSheet {
-        // Initialize with a default contentRect, similar to `createWindow`
+        // Initialize with a default contentRect, similar to `createSurface`
         let sheet = NSCustomSheet(
             contentRect: NSRect(
                 x: 0,
@@ -45,7 +45,7 @@ extension AppKitBackend {
 
     public func updateSheet(
         _ sheet: NSCustomSheet,
-        window: NSCustomWindow,
+        surface: Surface,
         environment: EnvironmentValues,
         size: SIMD2<Int>,
         onDismiss: @escaping () -> Void,
@@ -74,8 +74,8 @@ extension AppKitBackend {
         return SIMD2(x: Int(size.width), y: Int(size.height))
     }
 
-    public func presentSheet(_ sheet: NSCustomSheet, window: Window, parentSheet: Sheet?) {
-        let parent = parentSheet ?? window
+    public func presentSheet(_ sheet: NSCustomSheet, surface: Surface, parentSheet: Sheet?) {
+        let parent = parentSheet ?? surface
         // beginSheet and beginCriticalSheet should be equivalent here, because we
         // directly present the sheet on top of the top-most sheet. If we were to
         // instead present sheets on top of the root window every time, then
@@ -85,12 +85,12 @@ extension AppKitBackend {
         parent.nestedSheet = sheet
     }
 
-    public func dismissSheet(_ sheet: NSCustomSheet, window: Window, parentSheet: Sheet?) {
-        let parent = parentSheet ?? window
+    public func dismissSheet(_ sheet: NSCustomSheet, surface: Surface, parentSheet: Sheet?) {
+        let parent = parentSheet ?? surface
 
         // Dismiss nested sheets first
         if let nestedSheet = sheet.nestedSheet {
-            dismissSheet(nestedSheet, window: window, parentSheet: sheet)
+            dismissSheet(nestedSheet, surface: surface, parentSheet: sheet)
             // Although the current sheet has been dismissed programmatically,
             // the nested sheets kind of haven't (at least, they weren't
             // directly dismissed by SwiftCrossUI, so we must called onDismiss
@@ -100,6 +100,7 @@ extension AppKitBackend {
 
         parent.endSheet(sheet)
         parent.nestedSheet = nil
+        sheet.onDismiss?()
     }
 }
 
@@ -111,9 +112,16 @@ public final class NSCustomSheet: NSCustomWindow, NSWindowDelegate {
     public var backgroundView: NSView?
 
     @objc override public func cancelOperation(_ sender: Any?) {
-        if !interactiveDismissDisabled {
-            sheetParent?.endSheet(self)
-            onDismiss?()
+        guard !interactiveDismissDisabled else {
+            return
         }
+        onDismiss?()
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        guard !interactiveDismissDisabled else {
+            return
+        }
+        onDismiss?()
     }
 }

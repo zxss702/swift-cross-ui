@@ -30,13 +30,8 @@ public struct DismissWindowAction {
             return
         }
 
-        // NB: Must come after the `guard` above so that it captures the correct `window` binding
-        func closeWindow<Backend: BackendFeatures.WindowClosing>(backend: Backend) {
-            backend.close(window: window as! Backend.Window)
-        }
-        guard let backend = backend as? any BackendFeatures.WindowClosing else {
-            logger.warnOnce("\(type(of: backend)) doesn't support closing windows")
-            return
+        func closeWindow<Backend: BackendFeatures.CanvasSurface>(backend: Backend) {
+            backend.close(surface: window as! Backend.Surface)
         }
         closeWindow(backend: backend)
     }

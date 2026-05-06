@@ -38,7 +38,21 @@ public struct Binding<Value> {
             getValue()
         }
         nonmutating set {
+<<<<<<< Updated upstream
             setValue(newValue)
+=======
+            // Skip redundant writes when Value is Equatable
+            if let current = getValue() as? any Equatable,
+               let newValue = newValue as? any Equatable,
+               _swiftCrossUI_isEqual(current, newValue)
+            {
+                return
+            }
+            setValue(
+                newValue,
+                transaction.overlaid(by: TransactionContext.current)
+            )
+>>>>>>> Stashed changes
         }
     }
 
@@ -71,8 +85,22 @@ public struct Binding<Value> {
     ///   - get: The binding's getter.
     ///   - set: The binding's setter.
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
+<<<<<<< Updated upstream
+=======
+        self.transaction = Transaction()
         self.getValue = get
-        self.setValue = set
+        self.setValue = Self.wrappingSetter(get: get) { value, _ in set(value) }
+    }
+
+    /// Creates a binding with a custom getter and transaction-aware setter.
+    public init(
+        get: @escaping () -> Value,
+        set: @escaping (Value, Transaction) -> Void
+    ) {
+        self.transaction = Transaction()
+>>>>>>> Stashed changes
+        self.getValue = get
+        self.setValue = Self.wrappingSetter(get: get, set: set)
     }
 
     /// Converts a `Binding<Value?>` into a `Binding<Value>?`, returning `nil`
@@ -127,4 +155,38 @@ public struct Binding<Value> {
             }
         )
     }
+
+    private static func wrappingSetter(
+        get: @escaping () -> Value,
+        set: @escaping (Value, Transaction) -> Void
+    ) -> (Value, Transaction) -> Void {
+        return { newValue, transaction in
+            let current = get()
+            if let newHashable = newValue as? AnyHashable,
+               let currentHashable = current as? AnyHashable,
+               newHashable == currentHashable {
+                return
+            }
+            set(newValue, transaction)
+        }
+    }
 }
+<<<<<<< Updated upstream
+=======
+
+extension Binding: Identifiable where Value: Identifiable {
+    public var id: Value.ID {
+        wrappedValue.id
+    }
+
+    public typealias ID = Value.ID
+}
+
+private func _swiftCrossUI_isEqual(_ lhs: any Equatable, _ rhs: any Equatable) -> Bool {
+    func open<LHS: Equatable>(_ lhs: LHS) -> Bool {
+        guard let rhs = rhs as? LHS else { return false }
+        return lhs == rhs
+    }
+    return open(lhs)
+}
+>>>>>>> Stashed changes

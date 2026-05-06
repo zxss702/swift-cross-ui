@@ -93,10 +93,9 @@ public struct EnvironmentValues {
     /// to focus stealing prevention).
     @MainActor
     func bringWindowForward() {
-        func activate<Backend: BaseAppBackend>(with backend: Backend) {
-            backend.activate(window: window as! Backend.Window)
-        }
-        activate(with: backend)
+        // activate() has been removed from the backend protocol as part of the
+        // CanvasSurface refactor. Surface activation is now managed by the
+        // SwiftCrossUI layer.
     }
 
     /// The backend in use.
@@ -439,6 +438,21 @@ extension EnvironmentValues {
     /// The maximum number of lines that text can occupy in a view.
     public var lineLimit: Int? {
         lineLimitSettings?.limit
+    }
+
+    /// Backing store for the current navigation stack path binding.
+    @Entry private var navigationPathBindingStore = UncheckedSendable<Binding<NavigationPath>?>(
+        wrappedValue: nil
+    )
+
+    /// The path binding for the nearest enclosing ``NavigationStack``.
+    var navigationPathBinding: Binding<NavigationPath>? {
+        get {
+            navigationPathBindingStore.wrappedValue
+        }
+        set {
+            navigationPathBindingStore.wrappedValue = newValue
+        }
     }
 }
 

@@ -60,6 +60,14 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: Sendable {
     /// The dynamic property updater for this view.
     private var dynamicPropertyUpdater: DynamicPropertyUpdater<NodeView>
 
+<<<<<<< Updated upstream
+=======
+    /// Tracks Observation dependencies accessed while computing this node's
+    /// observation scope.
+    let observationTrackingState = ObservationTrackingState()
+    private var needsObservationRefresh = false
+
+>>>>>>> Stashed changes
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
     public init(
@@ -161,6 +169,67 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: Sendable {
             guard let self else { return }
             self.bottomUpUpdate()
         }
+<<<<<<< Updated upstream
+=======
+
+        graphUpdateHost.enqueueRenderFrame(
+            backend: backend,
+            transaction: transaction,
+            key: AnyHashable(ObjectIdentifier(self))
+        ) { [weak self] in
+            self?.performRenderFrame(transaction: transaction)
+        }
+    }
+
+    private func performRenderFrame(transaction: Transaction) {
+        parentEnvironment = parentEnvironment
+            .with(\.allowLayoutCaching, false)
+            .withCurrentTransaction(transaction)
+        _ = commit()
+        parentEnvironment = parentEnvironment.withoutCurrentTransaction()
+    }
+
+    private func refreshViewObservation(in environment: EnvironmentValues) {
+        guard NodeView.Content.self != Never.self else {
+            return
+        }
+
+        observe(in: backend) {
+            if let trackedView = view as? any ObservationTrackingView {
+                trackedView.readObservationDependencies(in: environment)
+            } else {
+                view.body
+            }
+        }
+    }
+
+    func prepareForLayout(with newView: NodeView?) {
+        guard let newView else {
+            return
+        }
+
+        let newKey = Self.layoutInputKey(for: newView)
+        if let newKey {
+            guard newKey != layoutInputKey else {
+                return
+            }
+            layoutInputKey = newKey
+            invalidateLayoutCache()
+        } else if layoutInputKey != nil {
+            layoutInputKey = nil
+            invalidateLayoutCache()
+        }
+    }
+
+    private func invalidateLayoutCache() {
+        resultCache = [:]
+        currentLayoutCacheKey = nil
+        layoutGeneration &+= 1
+    }
+
+    private static func layoutInputKey(for view: NodeView) -> AnyHashable? {
+        LayoutInputKeys.key(for: view)
+>>>>>>> Stashed changes
     }
 
     /// Recomputes the view's body and computes its layout and the layout of
@@ -197,7 +266,41 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: Sendable {
             hasHadFirstUpdate = true
         }
 
+<<<<<<< Updated upstream
         if proposedSize == lastProposedSize && !resultCache.isEmpty
+=======
+        let previousView: NodeView?
+        if let newView {
+            previousView = view
+            view = newView
+        } else {
+            previousView = nil
+        }
+
+        let viewEnvironment = updateEnvironment(environment)
+        let shouldRefreshObservation = newView != nil || needsObservationRefresh
+        dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
+        if shouldRefreshObservation {
+            refreshViewObservation(in: viewEnvironment)
+            needsObservationRefresh = false
+        }
+        prepareForLayout(with: newView)
+        let currentCacheKey = CurrentLayoutCacheKey(
+            proposedSize: proposedSize,
+            environment: environment.layoutInputFingerprint,
+            layoutGeneration: layoutGeneration
+        )
+
+        if !environment.allowLayoutCaching,
+            canReuseCommittedCurrentLayout,
+            currentLayoutCacheKey == currentCacheKey,
+            let currentLayout
+        {
+            parentEnvironment = environment
+            lastProposedSize = proposedSize
+            return currentLayout
+        } else if proposedSize == lastProposedSize && !resultCache.isEmpty
+>>>>>>> Stashed changes
             && (!parentEnvironment.allowLayoutCaching || environment.allowLayoutCaching),
             let currentLayout
         {

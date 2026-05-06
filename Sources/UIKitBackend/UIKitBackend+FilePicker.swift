@@ -25,7 +25,7 @@
         public func showOpenDialog(
             fileDialogOptions: FileDialogOptions,
             openDialogOptions: OpenDialogOptions,
-            window: UIWindow?,
+            surface: UIWindow?,
             resultHandler handleResult: @escaping (DialogResult<[URL]>) -> Void
         ) {
             var allowedTypes: [String] = []
@@ -55,13 +55,13 @@
             pickerController.delegate = delegate
             self.filePickerDelegates.setObject(delegate, forKey: pickerController)
 
-            guard let window = window ?? Self.mainWindow else {
+            guard let surface = surface ?? Self.mainWindow else {
                 fatalError(
                     "Attempting to present an open dialog before any windows have been created"
                 )
             }
 
-            window.rootViewController!.present(pickerController, animated: true)
+            surface.rootViewController!.present(pickerController, animated: true)
         }
     }
 #endif

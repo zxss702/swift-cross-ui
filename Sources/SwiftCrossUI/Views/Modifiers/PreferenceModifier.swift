@@ -11,7 +11,7 @@ extension View {
     }
 }
 
-struct PreferenceModifier<Child: View>: View {
+struct PreferenceModifier<Child: View>: View, ObservationTrackingView {
     var body: TupleView1<Child>
     var modification: (PreferenceValues, EnvironmentValues) -> PreferenceValues
 
@@ -37,7 +37,7 @@ struct PreferenceModifier<Child: View>: View {
             environment: environment,
             backend: backend
         )
-        result.preferences = modification(result.preferences, environment)
+        result.preferences = modifiedPreferences(result.preferences, environment)
         return result
     }
 
@@ -55,5 +55,17 @@ struct PreferenceModifier<Child: View>: View {
             environment: environment,
             backend: backend
         )
+    }
+
+    func readObservationDependencies(in environment: EnvironmentValues) {
+        _ = body
+        _ = modifiedPreferences(.default, environment)
+    }
+
+    private func modifiedPreferences(
+        _ preferences: PreferenceValues,
+        _ environment: EnvironmentValues
+    ) -> PreferenceValues {
+        modification(preferences, environment)
     }
 }

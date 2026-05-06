@@ -65,6 +65,69 @@ public protocol ObservableObject: AnyObject {
 
 extension ObservableObject {
     public var didChange: Publisher {
+<<<<<<< Updated upstream
+=======
+        observableObjectPublisherStore.publisher(for: self)
+    }
+}
+
+private let observableObjectPublisherStore = ObservableObjectPublisherStore()
+
+private final class ObservableObjectPublisherStore: @unchecked Sendable {
+    private final class Entry {
+        weak var owner: AnyObject?
+        let publisher: Publisher
+        var cancellables: [Cancellable]
+
+        init(
+            owner: AnyObject,
+            publisher: Publisher,
+            cancellables: [Cancellable]
+        ) {
+            self.owner = owner
+            self.publisher = publisher
+            self.cancellables = cancellables
+        }
+    }
+
+    private var entries: [ObjectIdentifier: Entry] = [:]
+    private let lock = NSLock()
+    /// Tracks how many times `publisher(for:)` has been called since the last prune.
+    private var accessCount = 0
+    /// Prune every N accesses to amortize cleanup cost.
+    private let pruneInterval = 16
+
+    func publisher(for object: any ObservableObject) -> Publisher {
+        let key = ObjectIdentifier(object)
+
+        lock.lock()
+        accessCount += 1
+        if accessCount >= pruneInterval {
+            accessCount = 0
+            pruneZombieEntries()
+        }
+        if let entry = entries[key], entry.owner != nil {
+            let publisher = entry.publisher
+            lock.unlock()
+            return publisher
+        }
+        lock.unlock()
+
+        let entry = makeEntry(for: object)
+
+        lock.lock()
+        entries[key] = entry
+        lock.unlock()
+
+        return entry.publisher
+    }
+
+    func pruneZombieEntries() {
+        entries = entries.filter { $0.value.owner != nil }
+    }
+
+    private func makeEntry(for object: any ObservableObject) -> Entry {
+>>>>>>> Stashed changes
         let publisher = Publisher()
             .tag(with: String(describing: type(of: self)))
 

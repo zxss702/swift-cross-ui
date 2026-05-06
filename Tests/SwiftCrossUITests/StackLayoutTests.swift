@@ -103,4 +103,15 @@ struct StackLayoutTests {
         _ = node.commit()
         return node
     }
+<<<<<<< Updated upstream
+=======
+
+    @MainActor
+    func makeContext() -> (DummyBackend, DummyBackend.Window, EnvironmentValues) {
+        let backend = DummyBackend()
+        let window = backend.createSurface(withDefaultSize: nil as SIMD2<Int>?)
+        let environment = EnvironmentValues(backend: backend).with(\.window, window)
+        return (backend, window, environment)
+    }
+>>>>>>> Stashed changes
 }

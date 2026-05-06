@@ -45,7 +45,7 @@ public struct PresentSingleFileOpenDialogAction: Sendable {
         func chooseFile<Backend: BackendFeatures.FileOpenDialogs>(backend: Backend) async -> URL? {
             await withCheckedContinuation { continuation in
                 backend.runInMainThread {
-                    let window = self.window.value.map { $0 as! Backend.Window }
+                    let window = self.window.value.map { $0 as! Backend.Surface }
 
                     backend.showOpenDialog(
                         fileDialogOptions: FileDialogOptions(
@@ -61,7 +61,7 @@ public struct PresentSingleFileOpenDialogAction: Sendable {
                             allowSelectingDirectories: allowSelectingDirectories,
                             allowMultipleSelections: false
                         ),
-                        window: window
+                        surface: window
                     ) { result in
                         switch result {
                             case .success(let url):

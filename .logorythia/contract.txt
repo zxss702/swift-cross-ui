@@ -1,0 +1,55 @@
+# 核心智能体之前创建的契约
+
+```
+契约目标：一次性完成 SwiftCrossUI 导航系统完全自研化与状态系统稳定性修复。
+
+用户原话："别分阶段了，一次给我做完。创建契约，然后开始吧"
+
+引用文件（核心需修改）：
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/SwiftCrossUI/Backend/BackendFeatures/Containers/NavigationStacks.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/SwiftCrossUI/Backend/BackendFeatures/Core/CoreWindowing.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/SwiftCrossUI/Backend/BackendFeatures/Windowing.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/SwiftCrossUI/Views/NavigationStack.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/SwiftCrossUI/Scenes/WindowReference.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/UIKitBackend/UIKitBackend+NavigationStack.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/GtkBackend/GtkBackend+NavigationStack.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/AppKitBackend/AppKitBackend+NavigationStack.swift
+- file:///Volumes/知阳/开发/Packges/swift-cross-ui/Sources/SwiftCrossUI/State/Publisher.swift（或相关状态文件）
+
+检查指标：
+1. 项目必须能够编译通过（swift build 无 error）
+2. NavigationStacks 协议及所有后端实现已移除
+3. NavigationStack 统一使用自研 fallback 路径，不依赖任何后端原生导航
+4. 窗口管理协议精简完成（CoreWindowing 重命名为 CanvasSurface 或等效最小接口）
+5. 后端窗口实现适配新协议
+6. 状态系统关键稳定性问题已修复（线程安全、僵尸条目、变更丢弃等）
+7. 所有修改符合 Swift 6 strict concurrency 要求
+8. 不破坏现有动画 / State 设计不变量
+
+禁止事项：
+- 禁止引入新的外部依赖（如 SwiftSyntax 运行时依赖）
+- 禁止顺手拆文件或改掉用户给出的命名
+- 禁止破坏现有非导航/非窗口相关的后端功能
+```
+
+# 完成检查清单
+
+- 移除 BackendFeatures.NavigationStacks 协议及其 NavigationStackPage 类型
+- 删除所有后端的 NavigationStack 原生实现文件（UIKit/Gtk/AppKit）
+- 重写 NavigationStack：移除原生导航路径检测，统一使用 GenericContainers fallback 并增强布局
+- 新增自研导航栏视图 NavigationBar（基础版本，包含标题和返回按钮）
+- 精简 CoreWindowing 为 CanvasSurface 最小协议：保留 createSurface/show/close/setSize/setResizeHandler/setChild，移除 setTitle/setBehaviors/activate 等
+- 新增 WindowManager 和 WindowChromeView（桌面端自绘窗口装饰基础结构）
+- 更新 WindowReference 适配 WindowManager / CanvasSurface
+- 更新 WindowGroupNode 适配新窗口管理路径
+- 更新所有后端（AppKit/UIKit/Gtk/WinUI）适配 CanvasSurface 协议
+- 修复 Publisher 线程安全问题（observations 加锁或隔离）
+- 清理 ObservableObjectPublisherStore 僵尸条目
+- 修复 ViewModelObserver.observe 变更静默丢弃问题
+- 修复 Binding 缺乏等值去重问题
+- 确保 swift build 编译通过
+- 确保 Swift 6 strict concurrency 无新增 warning
+- 修复测试文件：DummyBackend API 迁移后，所有测试文件中的 `createWindow` 调用已更新为 `createSurface`
+- 修复测试文件：`ObservableObject` 和 `@Published` 歧义问题已通过在测试中使用 `SwiftCrossUI.ObservableObject` 和 `@SwiftCrossUI.Published` 解决
+- 确认 GtkBackend+Toolbars.swift 和 Gtk3Backend+Toolbars.swift 已删除（引用不存在方法）
+- 确认 WindowChromeView.swift 已新增在 Views 目录

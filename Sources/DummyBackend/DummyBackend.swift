@@ -6,8 +6,7 @@ public final class DummyBackend:
     BackendFeatures.IncomingURLs,
     BackendFeatures.CornerRadius,
     BackendFeatures.Tables,
-    BackendFeatures.Colors,
-    BackendFeatures.Windowing
+    BackendFeatures.Colors
 {
     public class Window {
         static let defaultSize = SIMD2<Int>(400, 200)
@@ -29,6 +28,8 @@ public final class DummyBackend:
             size = defaultSize ?? Self.defaultSize
         }
     }
+
+    public typealias Surface = Window
 
     public class BreadthFirstWidgetIterator: IteratorProtocol {
         var queue: [Widget]
@@ -269,73 +270,54 @@ public final class DummyBackend:
         callback()
     }
 
-    public func createWindow(withDefaultSize defaultSize: SIMD2<Int>?) -> Window {
+    public func createSurface(withDefaultSize defaultSize: SIMD2<Int>?) -> Window {
         Window(defaultSize: defaultSize)
     }
 
-    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
-        window.colorScheme = environment.colorScheme
+    public func updateSurface(_ surface: Window, environment: EnvironmentValues) {
+        surface.colorScheme = environment.colorScheme
     }
 
-    public func setTitle(ofWindow window: Window, to title: String) {
-        window.title = title
+    public func setChild(ofSurface surface: Window, to child: Widget) {
+        surface.content = child
     }
 
-    public func setBehaviors(
-        ofWindow window: Window,
-        closable: Bool,
-        minimizable: Bool,
-        resizable: Bool
-    ) {
-        window.closable = closable
-        window.minimizable = minimizable
-        window.resizable = resizable
+    public func size(ofSurface surface: Window) -> SIMD2<Int> {
+        surface.size
     }
 
-    public func setChild(ofWindow window: Window, to child: Widget) {
-        window.content = child
-    }
-
-    public func size(ofWindow window: Window) -> SIMD2<Int> {
-        window.size
-    }
-
-    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
+    public func isSurfaceProgrammaticallyResizable(_ surface: Window) -> Bool {
         true
     }
 
-    public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
-        window.size = newSize
+    public func setSize(ofSurface surface: Window, to newSize: SIMD2<Int>) {
+        surface.size = newSize
     }
 
     public func setSizeLimits(
-        ofWindow window: Window,
+        ofSurface surface: Window,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
-        window.minimumSize = minimumSize
-        window.maximumSize = maximumSize
+        surface.minimumSize = minimumSize
+        surface.maximumSize = maximumSize
     }
 
-    public func setResizeHandler(ofWindow window: Window, to action: @escaping (SIMD2<Int>) -> Void)
+    public func setResizeHandler(ofSurface surface: Window, to action: @escaping (SIMD2<Int>) -> Void)
     {
-        window.resizeHandler = action
+        surface.resizeHandler = action
     }
 
-    public func show(window: Window) {
-        window.phase = .active
+    public func show(surface: Window) {
+        surface.phase = .active
     }
 
-    public func activate(window: Window) {
-        window.phase = .active
-    }
-    
-    public func close(window: Window) {
-        window.closeHandler?()
+    public func close(surface: Window) {
+        surface.closeHandler?()
     }
 
-    public func setCloseHandler(ofWindow window: Window, to action: @escaping () -> Void) {
-        window.closeHandler = action
+    public func setCloseHandler(ofSurface surface: Window, to action: @escaping () -> Void) {
+        surface.closeHandler = action
     }
 
     public func runInMainThread(action: @escaping @MainActor () -> Void) {
@@ -351,15 +333,15 @@ public final class DummyBackend:
 
     public func setRootEnvironmentChangeHandler(to action: @escaping @Sendable @MainActor () -> Void) {}
 
-    public func computeWindowEnvironment(window: Window, rootEnvironment: EnvironmentValues)
+    public func computeSurfaceEnvironment(surface: Window, rootEnvironment: EnvironmentValues)
         -> EnvironmentValues
     {
         rootEnvironment
-            .with(\.scenePhase, window.phase)
+            .with(\.scenePhase, surface.phase)
     }
 
-    public func setWindowEnvironmentChangeHandler(
-        of window: Window, to action: @escaping @Sendable @MainActor () -> Void
+    public func setSurfaceEnvironmentChangeHandler(
+        of surface: Window, to action: @escaping @Sendable @MainActor () -> Void
     ) {}
 
     public func setIncomingURLHandler(to action: @escaping (URL) -> Void) {

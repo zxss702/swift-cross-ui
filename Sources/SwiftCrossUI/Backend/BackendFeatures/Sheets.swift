@@ -21,11 +21,11 @@ extension BackendFeatures {
         ///
         /// - Parameters:
         ///   - sheet: The sheet to update.
-        ///   - window: The root window that the sheet will be presented in. Used on
+        ///   - surface: The root surface that the sheet will be presented in. Used on
         ///     platforms such as tvOS to compute layout constraints.
         ///
-        ///     The sheet shouldn't be attached to the window by `updateSheet`. That
-        ///     is handled by ``presentSheet(_:window:parentSheet:)`` which is
+        ///     The sheet shouldn't be attached to the surface by `updateSheet`. That
+        ///     is handled by ``presentSheet(_:surface:parentSheet:)`` which is
         ///     guaranteed to be called exactly once (unlike `updateSheet` which
         ///     gets called whenever preferences or sizing change).
         ///   - environment: The environment that the sheet will be presented in.
@@ -53,7 +53,7 @@ extension BackendFeatures {
         ///     the sheet.
         func updateSheet(
             _ sheet: Sheet,
-            window: Window,
+            surface: Surface,
             environment: EnvironmentValues,
             size: SIMD2<Int>,
             onDismiss: @escaping () -> Void,
@@ -64,7 +64,7 @@ extension BackendFeatures {
             interactiveDismissDisabled: Bool
         )
 
-        /// Presents a sheet as a modal on top of or within the given window.
+        /// Presents a sheet as a modal on top of or within the given surface.
         ///
         /// Sheets should disable interaction with all content below them until they
         /// get dismissed.
@@ -75,12 +75,12 @@ extension BackendFeatures {
         ///
         /// - Parameters:
         ///   - sheet: The sheet to present.
-        ///   - window: The window to present the sheet on top of.
+        ///   - surface: The surface to present the sheet on top of.
         ///   - parentSheet: The sheet that the current sheet was presented from,
         ///     if any.
         func presentSheet(
             _ sheet: Sheet,
-            window: Window,
+            surface: Surface,
             parentSheet: Sheet?
         )
 
@@ -91,9 +91,9 @@ extension BackendFeatures {
         ///
         /// - Parameters:
         ///   - sheet: The sheet to dismiss.
-        ///   - window: The window that the sheet was presented in.
+        ///   - surface: The surface that the sheet was presented in.
         ///   - parentSheet: The sheet that presented the current sheet, if any.
-        func dismissSheet(_ sheet: Sheet, window: Window, parentSheet: Sheet?)
+        func dismissSheet(_ sheet: Sheet, surface: Surface, parentSheet: Sheet?)
 
         /// Get the size of a sheet.
         ///

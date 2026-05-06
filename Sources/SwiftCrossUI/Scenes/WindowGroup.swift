@@ -59,14 +59,18 @@ public final class WindowGroupNode<Content: View>: SceneGraphNode {
 
         if openOnAppLaunch {
             let windowID = UUID()
-            self.windowReferences = [
-                windowID: WindowReference(
-                    scene: scene,
-                    backend: backend,
-                    environment: environment,
-                    onClose: { self.windowReferences[windowID] = nil }
-                )
-            ]
+            let reference = WindowReference(
+                scene: scene,
+                backend: backend,
+                environment: environment,
+                onClose: { [weak self] in
+                    guard let self else { return }
+                    WindowManager.shared.unregisterSurface(self.windowReferences[windowID]?.window as Any)
+                    self.windowReferences[windowID] = nil
+                }
+            )
+            self.windowReferences = [windowID: reference]
+            WindowManager.shared.registerSurface(reference.window)
         }
     }
 
@@ -94,9 +98,16 @@ public final class WindowGroupNode<Content: View>: SceneGraphNode {
                     scene: scene,
                     backend: backend,
                     environment: environment,
-                    onClose: { self.windowReferences[windowID] = nil }
+                    onClose: { [weak self] in
+                        guard let self else { return }
+                        if let ref = self.windowReferences[windowID] {
+                            WindowManager.shared.unregisterSurface(ref.window)
+                        }
+                        self.windowReferences[windowID] = nil
+                    }
                 )
                 windowReferences[windowID] = reference
+                WindowManager.shared.registerSurface(reference.window)
 
                 reference.update(
                     nil,

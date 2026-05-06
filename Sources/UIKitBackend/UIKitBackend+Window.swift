@@ -63,10 +63,10 @@ final class RootViewController: UIViewController {
     }
 }
 
-extension UIKitBackend: BackendFeatures.WindowBehaviors {
-    public typealias Window = UIWindow
+extension UIKitBackend {
+    public typealias Surface = UIWindow
 
-    public func createWindow(withDefaultSize _: SIMD2<Int>?) -> Window {
+    public func createSurface(withDefaultSize _: SIMD2<Int>?) -> Surface {
         let window: UIWindow
 
         if !Self.hasReturnedAWindow {
@@ -89,54 +89,50 @@ extension UIKitBackend: BackendFeatures.WindowBehaviors {
         return window
     }
 
-    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
+    public func updateSurface(_ surface: Surface, environment: EnvironmentValues) {
         // TODO(stackotter): Support preferredColorScheme
-        window.backgroundColor = switch environment.colorScheme {
+        surface.backgroundColor = switch environment.colorScheme {
             case .light: .white
             case .dark: .black
         }
     }
 
-    public func setTitle(ofWindow window: Window, to title: String) {
+    public func setTitle(ofSurface surface: Surface, to title: String) {
         // I don't think this achieves much of anything but might as well
-        window.rootViewController!.title = title
+        surface.rootViewController!.title = title
     }
 
-    public func setChild(ofWindow window: Window, to child: Widget) {
-        let viewController = window.rootViewController as! RootViewController
+    public func setChild(ofSurface surface: Surface, to child: Widget) {
+        let viewController = surface.rootViewController as! RootViewController
         viewController.setChild(to: child)
     }
 
-    public func size(ofWindow window: Window) -> SIMD2<Int> {
+    public func size(ofSurface surface: Surface) -> SIMD2<Int> {
         // For now, Views have no way to know where the safe area insets are, and the edges
         // of the screen could be obscured (e.g. covered by the notch). In the future we
         // might want to let users decide what to do, but for now, lie and say that the safe
         // area insets aren't even part of the window.
         // If/when this is updated, ``RootViewController`` and ``WidgetProtocolHelpers`` will
         // also need to be updated.
-        let size = window.safeAreaLayoutGuide.layoutFrame.size
+        let size = surface.safeAreaLayoutGuide.layoutFrame.size
         return SIMD2(Int(size.width), Int(size.height))
     }
 
     public func setResizeHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping (_ newSize: SIMD2<Int>) -> Void
     ) {
-        let viewController = window.rootViewController as! RootViewController
+        let viewController = surface.rootViewController as! RootViewController
         viewController.resizeHandler = { size in
             action(SIMD2(Int(size.width), Int(size.height)))
         }
     }
 
-    public func show(window: Window) {
-        window.makeKeyAndVisible()
+    public func show(surface: Surface) {
+        surface.makeKeyAndVisible()
     }
 
-    public func activate(window: Window) {
-        window.makeKeyAndVisible()
-    }
-
-    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
+    public func isSurfaceProgrammaticallyResizable(_ surface: Surface) -> Bool {
         #if os(visionOS)
             true
         #else
@@ -144,28 +140,14 @@ extension UIKitBackend: BackendFeatures.WindowBehaviors {
         #endif
     }
 
-    public func setBehaviors(
-        ofWindow window: Window,
-        closable: Bool,
-        minimizable: Bool,
-        resizable: Bool
-    ) {
-        if #available(iOS 16, tvOS 16, macCatalyst 16, *) {
-            window.windowScene?.windowingBehaviors?.isClosable = closable
-            window.windowScene?.windowingBehaviors?.isMiniaturizable = minimizable
-        }
-
-        logger.notice("ignoring resizability change")
-    }
-
-    public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
+    public func setSize(ofSurface surface: Surface, to newSize: SIMD2<Int>) {
         #if os(visionOS)
-            window.bounds.size = CGSize(width: CGFloat(newSize.x), height: CGFloat(newSize.y))
+            surface.bounds.size = CGSize(width: CGFloat(newSize.x), height: CGFloat(newSize.y))
         #else
             logger.notice(
                 "ignoring \(#function) call",
                 metadata: [
-                    "currentWindowSize": "\(window.bounds.width) x \(window.bounds.height)",
+                    "currentWindowSize": "\(surface.bounds.width) x \(surface.bounds.height)",
                     "proposedWindowSize": "\(newSize.x) x \(newSize.y)",
                 ]
             )
@@ -173,15 +155,15 @@ extension UIKitBackend: BackendFeatures.WindowBehaviors {
     }
 
     public func setSizeLimits(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
         // if windowScene is nil, either the window isn't shown or it must be fullscreen
         // if sizeRestrictions is nil, the device doesn't support setting window size bounds
-        window.windowScene?.sizeRestrictions?.minimumSize =
+        surface.windowScene?.sizeRestrictions?.minimumSize =
             CGSize(width: minimumSize.x, height: minimumSize.y)
-        window.windowScene?.sizeRestrictions?.maximumSize =
+        surface.windowScene?.sizeRestrictions?.maximumSize =
             if let maximumSize {
                 CGSize(width: maximumSize.x, height: maximumSize.y)
             } else {

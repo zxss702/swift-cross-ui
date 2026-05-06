@@ -30,6 +30,10 @@ struct TestError: LocalizedError {
     }
 }
 
+final class NavigationPathModel: SwiftCrossUI.ObservableObject {
+    @SwiftCrossUI.Published var path = NavigationPath()
+}
+
 @Suite("Testing for SwiftCrossUI")
 struct SwiftCrossUITests {
     @Test("Ensures that a NavigationPath can be round tripped to and from JSON")
@@ -57,6 +61,23 @@ struct SwiftCrossUITests {
         #expect(Self.compareComponents(ofType: Double.self, components[3], decodedComponents[3]))
     }
 
+    @Test("NavigationPath exposes collection-style helpers")
+    func testNavigationPathHelpers() {
+        var path = NavigationPath()
+
+        #expect(path.isEmpty)
+        #expect(path.count == 0)
+
+        path.append(contentsOf: ["a", "b", "c"])
+
+        #expect(!path.isEmpty)
+        #expect(path.count == 3)
+
+        path.removeLast()
+
+        #expect(path.count == 2)
+    }
+
     /// Helper function for `testCodableNavigationPath`.
     static func compareComponents<T: Equatable>(
         ofType type: T.Type, _ original: Any, _ decoded: Any
@@ -75,7 +96,7 @@ struct SwiftCrossUITests {
     @MainActor
     func testBasicScrollView() async throws {
         let backend = DummyBackend()
-        let window = backend.createWindow(withDefaultSize: nil)
+        let window = backend.createSurface(withDefaultSize: nil as SIMD2<Int>?)
         let environment = EnvironmentValues(backend: backend)
             .with(\.window, window)
 
@@ -155,12 +176,170 @@ struct SwiftCrossUITests {
         #expect(ambientColorScheme.value == .dark)
     }
 
+<<<<<<< Updated upstream
+=======
+    @Test("Ensure that navigationTitle and toolbar preferences are propagated")
+    @MainActor
+    func testToolbarPreferences() throws {
+        let backend = DummyBackend()
+        let window = backend.createSurface(withDefaultSize: nil as SIMD2<Int>?)
+        let environment = EnvironmentValues(backend: backend)
+            .with(\.window, window)
+
+        let view = Text("Inbox")
+            .navigationTitle("Inbox")
+            .toolbar {
+                Button("Add") {}
+                ToolbarItem(placement: .navigation) {
+                    Button("Back") {}
+                }
+                Spacer()
+                Divider()
+            }
+
+        let viewGraph = ViewGraph(
+            for: view,
+            backend: backend,
+            environment: environment
+        )
+        let result = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+
+        #expect(result.preferences.navigationTitle == "Inbox")
+
+        let items = result.preferences.toolbar.items
+        #expect(items.count == 4)
+        #expect(items[0].placement == .automatic)
+        #expect(items[1].placement == .navigation)
+        #expect(items[2].placement == .automatic)
+        #expect(items[3].placement == .automatic)
+
+        guard case .button(let addLabel, _) = items[0].content else {
+            Issue.record("Expected first toolbar item to be a button")
+            return
+        }
+        #expect(addLabel == "Add")
+
+        guard case .button(let backLabel, _) = items[1].content else {
+            Issue.record("Expected second toolbar item to be a button")
+            return
+        }
+        #expect(backLabel == "Back")
+
+        guard case .spacer = items[2].content else {
+            Issue.record("Expected third toolbar item to be a spacer")
+            return
+        }
+
+        guard case .separator = items[3].content else {
+            Issue.record("Expected fourth toolbar item to be a separator")
+            return
+        }
+    }
+
+    @Test("Ensure that NavigationStack propagates the visible page preferences")
+    @MainActor
+    func testNavigationStackVisiblePreferences() throws {
+        let backend = DummyBackend()
+        let window = backend.createSurface(withDefaultSize: nil as SIMD2<Int>?)
+        let environment = EnvironmentValues(backend: backend)
+            .with(\.window, window)
+
+        var path = NavigationPath()
+        path.append("detail")
+        let pathBinding = Binding(
+            get: { path },
+            set: { path = $0 }
+        )
+
+        let view = NavigationStack(path: pathBinding) {
+            Text("Root")
+                .navigationTitle("Root")
+        }
+        .navigationDestination(for: String.self) { value in
+            Text(value)
+                .navigationTitle("Detail")
+                .toolbar {
+                    Button("Done") {}
+                }
+        }
+
+        let viewGraph = ViewGraph(
+            for: view,
+            backend: backend,
+            environment: environment
+        )
+
+        var result = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+        viewGraph.commit()
+
+        #expect(result.preferences.navigationTitle == "Detail")
+        #expect(result.preferences.toolbar.items.count == 1)
+
+        path.removeAll()
+        result = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+        viewGraph.commit()
+
+        #expect(result.preferences.navigationTitle == "Root")
+        #expect(result.preferences.toolbar.items.isEmpty)
+    }
+
+    @Test("NavigationStack refreshes when its bound path changes")
+    @MainActor
+    func testNavigationStackRefreshesAfterPathMutation() async throws {
+        let backend = DummyBackend()
+        let window = backend.createSurface(withDefaultSize: nil as SIMD2<Int>?)
+        let environment = EnvironmentValues(backend: backend)
+            .with(\.window, window)
+
+        let model = NavigationPathModel()
+        let pathBinding = Binding(
+            get: { model.path },
+            set: { model.path = $0 }
+        )
+
+        let view = NavigationStack(path: pathBinding) {
+            Text("Root")
+        }
+        .navigationDestination(for: String.self) { value in
+            Text(value)
+        }
+
+        let viewGraph = ViewGraph(
+            for: view,
+            backend: backend,
+            environment: environment
+        )
+        _ = viewGraph.computeLayout(
+            proposedSize: .unspecified,
+            environment: environment
+        )
+        viewGraph.commit()
+
+        #expect(viewGraph.snapshot().children.count == 1)
+
+        pathBinding.wrappedValue.append("detail")
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(viewGraph.snapshot().children.count == 2)
+    }
+
+>>>>>>> Stashed changes
     #if canImport(AppKitBackend)
         @Test("Ensure that a basic view has the expected dimensions under AppKitBackend")
         @MainActor
         func testBasicLayout() async throws {
             let backend = AppKitBackend()
-            let window = backend.createWindow(withDefaultSize: SIMD2(200, 200))
+            let window = backend.createSurface(withDefaultSize: SIMD2(200, 200))
 
             // Idea taken from https://github.com/pointfreeco/swift-snapshot-testing/pull/533
             // and implemented in AppKitBackend.
@@ -174,7 +353,7 @@ struct SwiftCrossUITests {
                 backend: backend,
                 environment: environment
             )
-            backend.setChild(ofWindow: window, to: viewGraph.rootNode.widget.into())
+            backend.setChild(ofSurface: window, to: viewGraph.rootNode.widget.into())
 
             let result = viewGraph.computeLayout(
                 proposedSize: ProposedViewSize(200, 200),

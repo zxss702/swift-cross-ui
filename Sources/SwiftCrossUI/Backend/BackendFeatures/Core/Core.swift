@@ -10,10 +10,10 @@ extension BackendFeatures {
     ///
     /// ### Constituent Protocols
     /// - ``Widgets``
-    /// - ``CoreWindowing``
+    /// - ``CanvasSurface``
     /// - ``GenericContainers``
     @MainActor
-    public protocol Core: Widgets, CoreWindowing, GenericContainers {
+    public protocol Core: Widgets, CanvasSurface, GenericContainers {
         /// Creates an instance of the backend.
         init()
 

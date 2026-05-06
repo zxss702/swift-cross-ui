@@ -52,27 +52,62 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
     ) -> ViewLayoutResult {
         let leadingWidth = Double(backend.sidebarWidth(ofSplitView: widget))
 
-        // TODO: If computeLayout ever becomes a pure requirement of View, then we
-        //   can delay this until commit.
-        children.minimumLeadingWidth =
-            children.leadingChild.computeLayout(
+        let shouldMeasureMinimumWidths =
+            !children.hasMeasuredMinimumWidths
+            || (environment.allowLayoutCaching && proposedSize.width == 0)
+
+        let leadingMinimumResult: ViewLayoutResult?
+        let trailingMinimumResult: ViewLayoutResult?
+        if shouldMeasureMinimumWidths {
+            leadingMinimumResult = children.leadingChild.computeLayout(
                 with: body.view0,
                 proposedSize: ProposedViewSize(
                     0,
                     proposedSize.height
                 ),
                 environment: environment
-            ).size.width
+            )
 
-        children.minimumTrailingWidth =
-            children.trailingChild.computeLayout(
+            trailingMinimumResult = children.trailingChild.computeLayout(
                 with: body.view1,
                 proposedSize: ProposedViewSize(
                     0,
                     proposedSize.height
                 ),
                 environment: environment
-            ).size.width
+            )
+
+            children.minimumLeadingWidth = leadingMinimumResult!.size.width
+            children.minimumTrailingWidth = trailingMinimumResult!.size.width
+            children.minimumLeadingHeight = leadingMinimumResult!.size.height
+            children.minimumTrailingHeight = trailingMinimumResult!.size.height
+            children.hasMeasuredMinimumWidths = true
+        } else {
+            leadingMinimumResult = nil
+            trailingMinimumResult = nil
+        }
+
+        if proposedSize.width == 0,
+            let leadingMinimumResult,
+            let trailingMinimumResult
+        {
+            return ViewLayoutResult(
+                size: ViewSize(
+                    leadingMinimumResult.size.width + trailingMinimumResult.size.width,
+                    max(leadingMinimumResult.size.height, trailingMinimumResult.size.height)
+                ),
+                childResults: [leadingMinimumResult, trailingMinimumResult]
+            )
+        }
+        if proposedSize.width == 0 {
+            return ViewLayoutResult(
+                size: ViewSize(
+                    children.minimumLeadingWidth + children.minimumTrailingWidth,
+                    max(children.minimumLeadingHeight, children.minimumTrailingHeight)
+                ),
+                childResults: []
+            )
+        }
 
         // TODO: Figure out proper fixedSize behaviour (when width is unspecified)
         // Update pane children
@@ -87,7 +122,7 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
         let trailingResult = children.trailingChild.computeLayout(
             with: body.view1,
             proposedSize: ProposedViewSize(
-                proposedSize.width.map { $0 - max(leadingWidth, leadingResult.size.width) },
+                proposedSize.width.map { max($0 - max(leadingWidth, leadingResult.size.width), 0) },
                 proposedSize.height
             ),
             environment: environment
@@ -126,9 +161,14 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
             environment.onResize(.zero)
         }
 
+<<<<<<< Updated upstream
         let leadingWidth = backend.sidebarWidth(ofSplitView: widget)
         let leadingResult = children.leadingChild.commit()
         let trailingResult = children.trailingChild.commit()
+=======
+        _ = children.leadingChild.commit()
+        _ = children.trailingChild.commit()
+>>>>>>> Stashed changes
 
         backend.setSize(of: widget, to: layout.size.vector)
         backend.setSidebarWidthBounds(
@@ -141,22 +181,39 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
                 ))
         )
 
+<<<<<<< Updated upstream
         // Center pane children
+=======
+        let leadingWidth = backend.sidebarWidth(ofSplitView: widget)
+        let trailingWidth = max(layout.size.vector.x - leadingWidth, 0)
+        backend.setSize(
+            of: children.leadingPaneContainer.into(),
+            to: SIMD2(leadingWidth, layout.size.vector.y)
+        )
+        backend.setSize(
+            of: children.trailingPaneContainer.into(),
+            to: SIMD2(trailingWidth, layout.size.vector.y)
+        )
+
+        // Native split views anchor pane content to the top-leading corner; the
+        // pane containers provide the actual column size.
+>>>>>>> Stashed changes
         backend.setPosition(
             ofChildAt: 0,
             in: children.leadingPaneContainer.into(),
-            to: SIMD2(
-                leadingWidth - leadingResult.size.vector.x,
-                layout.size.vector.y - leadingResult.size.vector.y
-            ) / 2
+            to: .zero
         )
         backend.setPosition(
             ofChildAt: 0,
             in: children.trailingPaneContainer.into(),
+<<<<<<< Updated upstream
             to: SIMD2(
                 layout.size.vector.x - leadingWidth - trailingResult.size.vector.x,
                 layout.size.vector.y - trailingResult.size.vector.y
             ) / 2
+=======
+            to: .zero
+>>>>>>> Stashed changes
         )
     }
 }
@@ -167,6 +224,9 @@ class SplitViewChildren<Sidebar: View, Detail: View>: ViewGraphNodeChildren {
     var trailingPaneContainer: AnyWidget
     var minimumLeadingWidth: Double
     var minimumTrailingWidth: Double
+    var minimumLeadingHeight: Double
+    var minimumTrailingHeight: Double
+    var hasMeasuredMinimumWidths: Bool
 
     init<Backend: BaseAppBackend>(
         wrapping children: TupleView2<Sidebar, Detail>.Children,
@@ -191,6 +251,9 @@ class SplitViewChildren<Sidebar: View, Detail: View>: ViewGraphNodeChildren {
         self.trailingPaneContainer = AnyWidget(trailingPaneContainer)
         self.minimumLeadingWidth = 0
         self.minimumTrailingWidth = 0
+        self.minimumLeadingHeight = 0
+        self.minimumTrailingHeight = 0
+        self.hasMeasuredMinimumWidths = false
     }
 
     var erasedNodes: [ErasedViewGraphNode] {

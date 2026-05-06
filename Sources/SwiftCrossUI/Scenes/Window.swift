@@ -58,8 +58,15 @@ public final class WindowNode<Content: View>: SceneGraphNode {
                 scene: scene,
                 backend: backend,
                 environment: environment,
-                onClose: { self.windowReference = nil }
+                onClose: { [weak self] in
+                    guard let self, let ref = self.windowReference else { return }
+                    WindowManager.shared.unregisterSurface(ref.window)
+                    self.windowReference = nil
+                }
             )
+            if let reference = self.windowReference {
+                WindowManager.shared.registerSurface(reference.window)
+            }
         }
     }
 
@@ -90,9 +97,14 @@ public final class WindowNode<Content: View>: SceneGraphNode {
                     scene: scene,
                     backend: backend,
                     environment: environment,
-                    onClose: { self.windowReference = nil }
+                    onClose: { [weak self] in
+                        guard let self, let ref = self.windowReference else { return }
+                        WindowManager.shared.unregisterSurface(ref.window)
+                        self.windowReference = nil
+                    }
                 )
                 windowReference = reference
+                WindowManager.shared.registerSurface(reference.window)
 
                 reference.update(
                     nil,

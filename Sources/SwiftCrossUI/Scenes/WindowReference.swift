@@ -17,6 +17,13 @@ final class WindowReference<SceneType: WindowingScene> {
     private let containerWidget: AnyWidget
     /// The window's preferred color scheme, cached from the last update.
     private var preferredColorScheme: ColorScheme?
+    /// Window min/max layout probes are expensive on large navigation trees.
+    /// They only need to be recomputed when content or environment inputs may
+    /// have changed, not for every intermediate frame of a user resize.
+    private var cachedMinimumWindowSize: ViewSize?
+    private var cachedMaximumWindowSize: ViewSize?
+    private var pendingResizeSize: SIMD2<Int>?
+    private var hasScheduledResizeUpdate = false
 
     /// - Parameters:
     ///   - closeHandler: The action to perform when the window is closed. Should
@@ -28,7 +35,7 @@ final class WindowReference<SceneType: WindowingScene> {
         onClose closeHandler: @escaping @Sendable @MainActor () -> Void
     ) {
         self.scene = scene
-        let window = backend.createWindow(withDefaultSize: environment.defaultWindowSize)
+        let window = backend.createSurface(withDefaultSize: environment.defaultWindowSize)
 
         viewGraph = ViewGraph(
             for: scene.content(),
@@ -41,21 +48,21 @@ final class WindowReference<SceneType: WindowingScene> {
         backend.insert(rootWidget, into: container, at: 0)
         self.containerWidget = AnyWidget(container)
 
-        backend.setChild(ofWindow: window, to: container)
-        backend.setTitle(ofWindow: window, to: scene.title)
+        backend.setChild(ofSurface: window, to: container)
 
         self.window = window
+        WindowManager.shared.registerSurface(window)
         parentEnvironment = environment
 
-        if let backend = backend as? any BackendFeatures.WindowClosing {
-            func setCloseHandler<NewBackend: BackendFeatures.WindowClosing>(backend: NewBackend) {
-                backend.setCloseHandler(ofWindow: window as! NewBackend.Window, to: closeHandler)
-            }
-            setCloseHandler(backend: backend)
+        backend.setCloseHandler(ofSurface: window) { [weak self] in
+            guard let self else { return }
+            WindowManager.shared.unregisterSurface(self.window)
+            closeHandler()
         }
 
-        backend.setResizeHandler(ofWindow: window) { [weak self] newSize in
+        backend.setResizeHandler(ofSurface: window) { [weak self] newSize in
             guard let self else { return }
+<<<<<<< Updated upstream
             self.update(
                 self.scene,
                 proposedWindowSize: newSize,
@@ -79,6 +86,47 @@ final class WindowReference<SceneType: WindowingScene> {
                     !backend.isWindowProgrammaticallyResizable(window)
             )
         }
+=======
+            guard !self.isFirstUpdate else {
+                return
+            }
+            self.pendingResizeSize = newSize
+            guard !self.hasScheduledResizeUpdate else {
+                return
+            }
+            self.hasScheduledResizeUpdate = true
+
+            let transaction = TransactionContext.current
+            let delay = 1.0 / max(backend.preferredFramesPerSecond, 1)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, backend] in
+                guard let self else {
+                    return
+                }
+                self.hasScheduledResizeUpdate = false
+                guard let size = self.pendingResizeSize else {
+                    return
+                }
+                self.pendingResizeSize = nil
+                self.enqueueUpdate(
+                    backend: backend,
+                    transaction: transaction,
+                    key: "window-resize"
+                ) {
+                    self.update(
+                        self.scene,
+                        proposedWindowSize: size,
+                        needsWindowSizeCommit: false,
+                        backend: backend,
+                        environment: self.parentEnvironment,
+                        windowSizeIsFinal:
+                            !backend.isSurfaceProgrammaticallyResizable(window),
+                        recomputeWindowSizeLimits: false
+                    )
+                }
+            }
+        }
+
+>>>>>>> Stashed changes
     }
 
     func update<Backend: BaseAppBackend>(
@@ -86,12 +134,12 @@ final class WindowReference<SceneType: WindowingScene> {
         backend: Backend,
         environment: EnvironmentValues
     ) {
-        guard let window = window as? Backend.Window else {
+        guard let window = window as? Backend.Surface else {
             fatalError("Scene updated with a backend incompatible with the window it was given")
         }
 
         let isProgramaticallyResizable =
-            backend.isWindowProgrammaticallyResizable(window)
+            backend.isSurfaceProgrammaticallyResizable(window)
 
         let proposedWindowSize: SIMD2<Int>
         let usedDefaultSize: Bool
@@ -99,7 +147,11 @@ final class WindowReference<SceneType: WindowingScene> {
             proposedWindowSize = environment.defaultWindowSize
             usedDefaultSize = true
         } else {
+<<<<<<< Updated upstream
             proposedWindowSize = cachedWindowSize ?? backend.size(ofWindow: window)
+=======
+            proposedWindowSize = backend.size(ofSurface: window)
+>>>>>>> Stashed changes
             usedDefaultSize = false
         }
 
@@ -137,7 +189,27 @@ final class WindowReference<SceneType: WindowingScene> {
         environment: EnvironmentValues,
         windowSizeIsFinal: Bool = false
     ) {
-        guard let window = window as? Backend.Window else {
+        update(
+            newScene,
+            proposedWindowSize: proposedWindowSize,
+            needsWindowSizeCommit: needsWindowSizeCommit,
+            backend: backend,
+            environment: environment,
+            windowSizeIsFinal: windowSizeIsFinal,
+            recomputeWindowSizeLimits: true
+        )
+    }
+
+    private func update<Backend: BaseAppBackend>(
+        _ newScene: SceneType?,
+        proposedWindowSize: SIMD2<Int>,
+        needsWindowSizeCommit: Bool,
+        backend: Backend,
+        environment: EnvironmentValues,
+        windowSizeIsFinal: Bool = false,
+        recomputeWindowSizeLimits: Bool
+    ) {
+        guard let window = window as? Backend.Surface else {
             fatalError("Scene updated with a backend incompatible with the window it was given")
         }
 
@@ -149,15 +221,20 @@ final class WindowReference<SceneType: WindowingScene> {
             // 'default' size which would mean that setting the default size every time
             // the default size changed would resize the window (which is incorrect
             // behaviour).
-            backend.setTitle(ofWindow: window, to: newScene.title)
             scene = newScene
         }
 
         var environment =
+<<<<<<< Updated upstream
             backend.computeWindowEnvironment(
                 window: window,
                 rootEnvironment: environment.with(\.window, window)
             )
+=======
+            environment
+            .with(\.window, window)
+            .with(\.graphUpdateHost, viewGraph.updateHost)
+>>>>>>> Stashed changes
             .with(\.onResize) { [weak self] _ in
                 guard let self else { return }
                 self.cachedWindowSize = nil
@@ -169,9 +246,24 @@ final class WindowReference<SceneType: WindowingScene> {
                     proposedWindowSize: backend.size(ofWindow: window),
                     needsWindowSizeCommit: false,
                     backend: backend,
+<<<<<<< Updated upstream
                     environment: environment
                 )
             }
+=======
+                    transaction: transaction,
+                    key: "window-content-resize"
+                ) {
+                    self.update(
+                        self.scene,
+                        proposedWindowSize: backend.size(ofSurface: window),
+                        needsWindowSizeCommit: false,
+                        backend: backend,
+                        environment: environment.withCurrentTransaction(transaction)
+                    )
+                }
+        }
+>>>>>>> Stashed changes
         let outerColorScheme = environment.colorScheme
 
         // Update environment with latest cached value before first update to
@@ -182,6 +274,7 @@ final class WindowReference<SceneType: WindowingScene> {
             environment.colorScheme = preferredColorScheme
         }
 
+<<<<<<< Updated upstream
         let probingResult = viewGraph.computeLayout(
             with: newScene?.content(),
             proposedSize: .zero,
@@ -195,6 +288,30 @@ final class WindowReference<SceneType: WindowingScene> {
             outerColorScheme: outerColorScheme,
             backend: backend
         )
+=======
+        let content = self.observe(in: backend) { newScene?.content() }
+        let shouldRecomputeSizeLimits =
+            recomputeWindowSizeLimits || cachedMinimumWindowSize == nil
+        let minimumWindowSize: ViewSize
+        if shouldRecomputeSizeLimits {
+            let probingResult = viewGraph.computeLayout(
+                with: content,
+                proposedSize: .zero,
+                environment: environment
+                    .with(\.allowLayoutCaching, true)
+            )
+            minimumWindowSize = probingResult.size
+            cachedMinimumWindowSize = minimumWindowSize
+            updateEnvironment(
+                &environment,
+                viewLayoutResult: probingResult,
+                outerColorScheme: outerColorScheme,
+                backend: backend
+            )
+        } else {
+            minimumWindowSize = cachedMinimumWindowSize!
+        }
+>>>>>>> Stashed changes
 
         // With `.contentSize`, the window's maximum size is the maximum size of its
         // content. With `.contentMinSize` (and `.automatic`), there is no maximum
@@ -202,19 +319,25 @@ final class WindowReference<SceneType: WindowingScene> {
         let maximumWindowSize: ViewSize?
         switch environment.windowResizability {
             case .contentSize:
-                let result = viewGraph.computeLayout(
-                    with: newScene?.content(),
-                    proposedSize: .infinity,
-                    environment: environment.with(\.allowLayoutCaching, true)
-                )
-                updateEnvironment(
-                    &environment,
-                    viewLayoutResult: result,
-                    outerColorScheme: outerColorScheme,
-                    backend: backend
-                )
-                maximumWindowSize = result.size
+                if shouldRecomputeSizeLimits || cachedMaximumWindowSize == nil {
+                    let result = viewGraph.computeLayout(
+                        with: newScene?.content(),
+                        proposedSize: .infinity,
+                        environment: environment.with(\.allowLayoutCaching, true)
+                    )
+                    updateEnvironment(
+                        &environment,
+                        viewLayoutResult: result,
+                        outerColorScheme: outerColorScheme,
+                        backend: backend
+                    )
+                    maximumWindowSize = result.size
+                    cachedMaximumWindowSize = maximumWindowSize
+                } else {
+                    maximumWindowSize = cachedMaximumWindowSize
+                }
             case .automatic, .contentMinSize:
+                cachedMaximumWindowSize = nil
                 maximumWindowSize = nil
         }
 
@@ -238,17 +361,20 @@ final class WindowReference<SceneType: WindowingScene> {
                 needsWindowSizeCommit: true,
                 backend: backend,
                 environment: environment,
-                windowSizeIsFinal: true
+                windowSizeIsFinal: true,
+                recomputeWindowSizeLimits: false
             )
         }
 
-        // Set these even if the window isn't programmatically resizable
-        // because the window may still be user resizable.
-        backend.setSizeLimits(
-            ofWindow: window,
-            minimum: minimumWindowSize.vector,
-            maximum: maximumWindowSize?.vector
-        )
+        if shouldRecomputeSizeLimits || needsWindowSizeCommit {
+            // Set these even if the window isn't programmatically resizable
+            // because the window may still be user resizable.
+            backend.setSizeLimits(
+                ofSurface: window,
+                minimum: minimumWindowSize.vector,
+                maximum: maximumWindowSize?.vector
+            )
+        }
 
         let finalContentResult = viewGraph.computeLayout(
             proposedSize: ProposedViewSize(proposedWindowSize),
@@ -268,44 +394,49 @@ final class WindowReference<SceneType: WindowingScene> {
         )
 
         if needsWindowSizeCommit {
-            backend.setSize(ofWindow: window, to: proposedWindowSize)
+            backend.setSize(ofSurface: window, to: proposedWindowSize)
         }
         cachedWindowSize = proposedWindowSize
 
-        if let backend = backend as? any BackendFeatures.WindowBehaviors {
-            func setBehaviors<NewBackend: BackendFeatures.WindowBehaviors>(backend: NewBackend) {
-                backend.setBehaviors(
-                    ofWindow: window as! NewBackend.Window,
-                    closable:
-                        finalContentResult.preferences.windowDismissBehavior?.isEnabled ?? true,
-                    minimizable:
-                        finalContentResult.preferences.preferredWindowMinimizeBehavior?.isEnabled ?? true,
-                    resizable:
-                        finalContentResult.preferences.windowResizeBehavior?.isEnabled ?? true
+        let shouldUpdateWindowChrome =
+            recomputeWindowSizeLimits || needsWindowSizeCommit || isFirstUpdate
+
+<<<<<<< Updated upstream
+=======
+        if shouldUpdateWindowChrome,
+            let backend = backend as? any BackendFeatures.WindowToolbars
+        {
+            func setToolbar<NewBackend: BackendFeatures.WindowToolbars>(backend: NewBackend) {
+                backend.setToolbar(
+                    ofSurface: window as! NewBackend.Surface,
+                    to: finalContentResult.preferences.toolbar,
+                    navigationTitle: finalContentResult.preferences.navigationTitle,
+                    environment: environment
                 )
             }
-            setBehaviors(backend: backend)
+            setToolbar(backend: backend)
         }
 
+>>>>>>> Stashed changes
         // Generally just used to update the window color scheme
-        backend.updateWindow(window, environment: environment)
+        backend.updateSurface(window, environment: environment)
 
         // Delay committing the view graph so that the View.inspectWindow(_:)
         // modifiers can be used to overwrite certain SwiftCrossUI behaviors
         viewGraph.commit()
 
         if isFirstUpdate {
-            backend.show(window: window)
+            backend.show(surface: window)
             isFirstUpdate = false
         }
     }
 
     func activate<Backend: BaseAppBackend>(backend: Backend) {
-        guard let window = window as? Backend.Window else {
+        guard let window = window as? Backend.Surface else {
             fatalError("Scene updated with a backend incompatible with the window it was given")
         }
 
-        backend.activate(window: window)
+        // activate() has been removed from the backend protocol.
     }
 
     private func updateEnvironment<Backend: BaseAppBackend>(

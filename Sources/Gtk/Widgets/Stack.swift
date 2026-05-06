@@ -6,6 +6,7 @@ import CGtk
 
 open class Stack: Widget {
     private var pages = [Widget]()
+    public var notifyVisibleChild: ((Stack) -> Void)?
 
     public convenience init(transitionDuration: Int, transitionType: StackTransitionType) {
         self.init(gtk_stack_new())
@@ -40,6 +41,29 @@ open class Stack: Widget {
     public func setVisible(_ child: Widget) {
         if pages.contains(where: { $0 === child }) {
             gtk_stack_set_visible_child(opaquePointer, child.castedPointer())
+        }
+    }
+
+    public var visibleChild: Widget? {
+        guard let childPointer = gtk_stack_get_visible_child(opaquePointer) else {
+            return nil
+        }
+        return pages.first { $0.widgetPointer == childPointer }
+    }
+
+    open override func didMoveToParent() {
+        super.didMoveToParent()
+
+        let handler:
+            @convention(c) (UnsafeMutableRawPointer, OpaquePointer, UnsafeMutableRawPointer) -> Void =
+                { _, value1, data in
+                    SignalBox1<OpaquePointer>.run(data, value1)
+                }
+
+        addSignal(name: "notify::visible-child", handler: gCallback(handler)) {
+            [weak self] (_: OpaquePointer) in
+            guard let self else { return }
+            self.notifyVisibleChild?(self)
         }
     }
 }

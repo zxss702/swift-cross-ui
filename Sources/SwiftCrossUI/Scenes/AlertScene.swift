@@ -71,7 +71,7 @@ public final class AlertSceneNode: SceneGraphNode {
                 actionLabels: scene.actions.map(\.label),
                 environment: environment
             )
-            backend.showAlert(alert, window: nil) { responseId in
+            backend.showAlert(alert, surface: nil) { responseId in
                 self.alert = nil
                 self.scene.isPresented = false
                 self.scene.actions[responseId].action()
@@ -79,7 +79,7 @@ public final class AlertSceneNode: SceneGraphNode {
 
             self.alert = alert
         } else if !scene.isPresented, let alert {
-            backend.dismissAlert(alert as! NewBackend.Alert, window: nil)
+            backend.dismissAlert(alert as! NewBackend.Alert, surface: nil)
             self.alert = nil
         }
     }

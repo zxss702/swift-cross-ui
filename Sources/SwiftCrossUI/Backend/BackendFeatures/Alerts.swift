@@ -34,36 +34,36 @@ extension BackendFeatures {
             environment: EnvironmentValues
         )
 
-        /// Shows an alert as a modal on top of or within the given window.
+        /// Shows an alert as a modal on top of or within the given surface.
         ///
-        /// Users should be unable to interact with the parent window until the
+        /// Users should be unable to interact with the parent surface until the
         /// alert is dismissed.
         ///
         /// Must only be called once for any given alert.
         ///
         /// - Parameters:
         ///   - alert: The alert to show.
-        ///   - window: The window to attach the alert to. If `nil`, the backend can
-        ///     either make the alert a whole app modal, a standalone window, or a
-        ///     modal for a window of its choosing.
+        ///   - surface: The surface to attach the alert to. If `nil`, the backend can
+        ///     either make the alert a whole app modal, a standalone surface, or a
+        ///     modal for a surface of its choosing.
         ///   - handleResponse: The code to run when an action is selected. Receives
         ///     the index of the chosen action (as per the `actionLabels` array).
         ///     The alert will have already been hidden by the time this gets
         ///     called.
         func showAlert(
             _ alert: Alert,
-            window: Window?,
+            surface: Surface?,
             responseHandler handleResponse: @escaping (Int) -> Void
         )
 
         /// Dismisses an alert programmatically without invoking the response
         /// handler.
         ///
-        /// Must only be called after ``showAlert(_:window:responseHandler:)``.
+        /// Must only be called after ``showAlert(_:surface:responseHandler:)``.
         ///
         /// - Parameters:
         ///   - alert: The alert to dismiss.
-        ///   - window: The window the alert is attached to, if any.
-        func dismissAlert(_ alert: Alert, window: Window?)
+        ///   - surface: The surface the alert is attached to, if any.
+        func dismissAlert(_ alert: Alert, surface: Surface?)
     }
 }

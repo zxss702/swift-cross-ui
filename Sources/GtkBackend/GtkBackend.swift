@@ -27,10 +27,9 @@ public final class GtkBackend:
     BackendFeatures.Paths,
     BackendFeatures.Tooltips,
     BackendFeatures.Colors,
-    BackendFeatures.DatePickers,
-    BackendFeatures.Windowing
+    BackendFeatures.DatePickers
 {
-    public typealias Window = Gtk.ApplicationWindow
+    public typealias Surface = Gtk.ApplicationWindow
     public typealias Widget = Gtk.Widget
     public typealias Menu = Gtk.PopoverMenu
     public typealias Alert = Gtk.MessageDialog
@@ -63,11 +62,11 @@ public final class GtkBackend:
     /// A window to be returned on the next call to ``GtkBackend/createWindow``.
     /// This is necessary because Gtk creates a root window no matter what, and
     /// this needs to be returned on the first call to `createWindow`.
-    var precreatedWindow: Window?
+    var precreatedWindow: Surface?
 
     /// All current windows associated with the application. Doesn't include the
-    /// precreated window until it gets 'created' via `createWindow`.
-    var windows: [Window] = []
+    /// precreated window until it gets 'created' via `createSurface`.
+    var windows: [Surface] = []
 
     private var rootEnvironmentChangeHandler: (() -> Void)?
 
@@ -165,7 +164,7 @@ public final class GtkBackend:
         }
     }
 
-    public func createWindow(withDefaultSize defaultSize: SIMD2<Int>?) -> Window {
+    public func createSurface(withDefaultSize defaultSize: SIMD2<Int>?) -> Surface {
         let window: Gtk.ApplicationWindow
         if let precreatedWindow {
             self.precreatedWindow = nil
@@ -192,39 +191,24 @@ public final class GtkBackend:
         return window
     }
 
-    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
+    public func updateSurface(_ surface: Surface, environment: EnvironmentValues) {
         // TODO(stackotter): Support preferredColorScheme
     }
 
-    public func setTitle(ofWindow window: Window, to title: String) {
-        window.title = title
+    public func setTitle(ofSurface surface: Surface, to title: String) {
+        surface.title = title
     }
 
-    public func setBehaviors(
-        ofWindow window: Window,
-        closable: Bool,
-        minimizable: Bool,
-        resizable: Bool
-    ) {
-        // FIXME: This doesn't seem to work on macOS at least
-        window.deletable = closable
-
-        // TODO: Figure out if there's some magic way to disable minimization
-        //   in a framework where the minimize button usually doesn't even exist
-
-        window.resizable = resizable
-    }
-
-    public func setChild(ofWindow window: Window, to child: Widget) {
+    public func setChild(ofSurface surface: Surface, to child: Widget) {
         let container = wrapInCustomRootContainer(child)
-        window.setChild(container)
+        surface.setChild(container)
     }
 
-    private func menubarHeight(ofWindow window: Window) -> Int {
+    private func menubarHeight(ofSurface surface: Surface) -> Int {
         #if os(macOS)
             return 0
         #else
-            if window.showMenuBar {
+            if surface.showMenuBar {
                 // TODO: Don't hardcode this (if possible), because some Gtk
                 //   themes may affect the height of the menu bar.
                 25
@@ -234,32 +218,32 @@ public final class GtkBackend:
         #endif
     }
 
-    public func size(ofWindow window: Window) -> SIMD2<Int> {
-        let child = window.getChild() as! CustomRootWidget
+    public func size(ofSurface surface: Surface) -> SIMD2<Int> {
+        let child = surface.getChild() as! CustomRootWidget
         let size = child.getSize()
         return SIMD2(size.width, size.height)
     }
 
-    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
+    public func isSurfaceProgrammaticallyResizable(_ surface: Surface) -> Bool {
         // TODO: Detect whether window is fullscreen
         return true
     }
 
-    public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
-        let child = window.getChild() as! CustomRootWidget
-        window.size = Size(
+    public func setSize(ofSurface surface: Surface, to newSize: SIMD2<Int>) {
+        let child = surface.getChild() as! CustomRootWidget
+        surface.size = Size(
             width: newSize.x,
-            height: newSize.y + menubarHeight(ofWindow: window)
+            height: newSize.y + menubarHeight(ofSurface: surface)
         )
         child.preemptAllocatedSize(allocatedWidth: newSize.x, allocatedHeight: newSize.y)
     }
 
     public func setSizeLimits(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
-        window.setMinimumSize(to: Size(width: minimumSize.x, height: minimumSize.y))
+        surface.setMinimumSize(to: Size(width: minimumSize.x, height: minimumSize.y))
 
         // NB: GTK does not support setting maximum sizes for widgets. It just doesn't.
         // https://discourse.gnome.org/t/how-to-build-fixed-size-windows-in-gtk-4/22807/10
@@ -269,10 +253,10 @@ public final class GtkBackend:
     }
 
     public func setResizeHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping (_ newSize: SIMD2<Int>) -> Void
     ) {
-        let child = window.getChild() as! CustomRootWidget
+        let child = surface.getChild() as! CustomRootWidget
         child.setResizeHandler { size in
             self.runInMainThread {
                 action(SIMD2(size.width, size.height))
@@ -280,25 +264,21 @@ public final class GtkBackend:
         }
     }
 
-    public func show(window: Window) {
-        window.show()
+    public func show(surface: Surface) {
+        surface.show()
     }
 
-    public func activate(window: Window) {
-        window.present()
-    }
-
-    public func close(window: Window) {
-        window.close()
+    public func close(surface: Surface) {
+        surface.close()
     }
 
     public func setCloseHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping () -> Void
     ) {
-        window.onCloseRequest = { _ in
+        surface.onCloseRequest = { _ in
             action()
-            window.destroy()
+            surface.destroy()
         }
     }
 
@@ -520,22 +500,6 @@ public final class GtkBackend:
     public func setRootEnvironmentChangeHandler(to action: @escaping @Sendable @MainActor () -> Void) {
         // TODO: React to theme changes
         self.rootEnvironmentChangeHandler = action
-    }
-
-    public func computeWindowEnvironment(
-        window: Window,
-        rootEnvironment: EnvironmentValues
-    ) -> EnvironmentValues {
-        // TODO: Record window scale factor in here
-        rootEnvironment
-            .with(\.scenePhase, window.isActive ? .active : .inactive)
-    }
-
-    public func setWindowEnvironmentChangeHandler(
-        of window: Window,
-        to action: @escaping @Sendable @MainActor () -> Void
-    ) {
-        // TODO: Notify when window scale factor changes
     }
 
     public func setIncomingURLHandler(to action: @escaping (URL) -> Void) {
@@ -1388,7 +1352,7 @@ public final class GtkBackend:
 
     public func showAlert(
         _ alert: Alert,
-        window: Window?,
+        surface: Surface?,
         responseHandler handleResponse: @escaping (Int) -> Void
     ) {
         alert.response = { _, responseId in
@@ -1405,18 +1369,18 @@ public final class GtkBackend:
         }
         alert.isModal = true
         alert.isDecorated = false
-        alert.setTransient(for: window ?? windows[0])
+        alert.setTransient(for: surface ?? windows[0])
         alert.show()
     }
 
-    public func dismissAlert(_ alert: Alert, window: Window?) {
+    public func dismissAlert(_ alert: Alert, surface: Surface?) {
         alert.destroy()
     }
 
     public func showOpenDialog(
         fileDialogOptions: FileDialogOptions,
         openDialogOptions: OpenDialogOptions,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<[URL]>) -> Void
     ) {
         showFileChooserDialog(
@@ -1425,7 +1389,7 @@ public final class GtkBackend:
             configure: { chooser in
                 chooser.selectMultiple = openDialogOptions.allowMultipleSelections
             },
-            window: window ?? windows[0],
+            surface: surface ?? windows[0],
             resultHandler: handleResult
         )
     }
@@ -1433,7 +1397,7 @@ public final class GtkBackend:
     public func showSaveDialog(
         fileDialogOptions: FileDialogOptions,
         saveDialogOptions: SaveDialogOptions,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<URL>) -> Void
     ) {
         showFileChooserDialog(
@@ -1444,7 +1408,7 @@ public final class GtkBackend:
                     chooser.setCurrentName(defaultFileName)
                 }
             },
-            window: window ?? windows[0]
+            surface: surface ?? windows[0]
         ) { result in
             switch result {
                 case .success(let urls):
@@ -1460,12 +1424,12 @@ public final class GtkBackend:
         fileDialogOptions: FileDialogOptions,
         action: FileChooserAction,
         configure: (Gtk.FileChooserNative) -> Void,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<[URL]>) -> Void
     ) {
         let chooser = Gtk.FileChooserNative(
             title: fileDialogOptions.title,
-            parent: window?.widgetPointer.cast(),
+            parent: surface?.widgetPointer.cast(),
             action: action.toGtk(),
             acceptLabel: fileDialogOptions.defaultButtonLabel,
             cancelLabel: "Cancel"
@@ -1920,7 +1884,7 @@ public final class GtkBackend:
 
     public func updateSheet(
         _ sheet: Sheet,
-        window: Window,
+        surface: Surface,
         environment: EnvironmentValues,
         size: SIMD2<Int>,
         onDismiss: @escaping () -> Void,
@@ -1955,8 +1919,8 @@ public final class GtkBackend:
         // - dragIndicatorVisibility is only supported on mobile so we ignore it.
     }
 
-    public func presentSheet(_ sheet: Sheet, window: Window, parentSheet: Sheet?) {
-        let parent = parentSheet ?? window
+    public func presentSheet(_ sheet: Sheet, surface: Surface, parentSheet: Sheet?) {
+        let parent = parentSheet ?? surface
         sheet.isModal = true
         sheet.isDecorated = false
         sheet.destroyWithParent = true
@@ -1967,7 +1931,7 @@ public final class GtkBackend:
         sheet.present()
     }
 
-    public func dismissSheet(_ sheet: Sheet, window: Window, parentSheet: Sheet?) {
+    public func dismissSheet(_ sheet: Sheet, surface: Surface, parentSheet: Sheet?) {
         dismissSheet(sheet)
     }
 

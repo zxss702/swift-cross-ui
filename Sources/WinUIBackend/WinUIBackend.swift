@@ -48,8 +48,7 @@ public final class WinUIBackend:
     BackendFeatures.Paths,
     BackendFeatures.Tooltips,
     BackendFeatures.Colors,
-    BackendFeatures.DatePickers,
-    BackendFeatures.Windowing
+    BackendFeatures.DatePickers
 {
     // Logging
     private struct LogLocation: Hashable, Equatable {
@@ -74,7 +73,7 @@ public final class WinUIBackend:
         #endif
     }
 
-    public typealias Window = CustomWindow
+    public typealias Surface = CustomWindow
     public typealias Widget = WinUI.FrameworkElement
     public typealias Menu = WinUI.MenuFlyout
     public typealias Alert = WinUI.ContentDialog
@@ -113,7 +112,7 @@ public final class WinUIBackend:
     /// exceptions), so we limit ourselves.
     private var dialogSemaphore = DispatchSemaphore(value: 1)
 
-    private var windows: [Window] = []
+    private var windows: [Surface] = []
 
     private var measurementTextBlock: TextBlock!
 
@@ -179,7 +178,7 @@ public final class WinUIBackend:
         WinUIApplication.main()
     }
 
-    public func createWindow(withDefaultSize size: SIMD2<Int>?) -> Window {
+    public func createSurface(withDefaultSize size: SIMD2<Int>?) -> Surface {
         let window = CustomWindow()
         windows.append(window)
         window.closed.addHandler { _, _ in
@@ -219,13 +218,13 @@ public final class WinUIBackend:
         // print(GetDpiForWindow(nil))
 
         if let size {
-            setSize(ofWindow: window, to: size)
+            setSize(ofSurface: window, to: size)
         }
         return window
     }
 
-    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
-        window.menuBar.requestedTheme = switch environment.colorScheme {
+    public func updateSurface(_ surface: Surface, environment: EnvironmentValues) {
+        surface.menuBar.requestedTheme = switch environment.colorScheme {
             case .light: .light
             case .dark: .dark
         }
@@ -236,39 +235,39 @@ public final class WinUIBackend:
         }
         let brush = WinUI.SolidColorBrush()
         brush.color = backgroundColor.resolve(in: environment).uwpColor
-        window.grid.background = brush
+        surface.grid.background = brush
     }
 
-    public func size(ofWindow window: Window) -> SIMD2<Int> {
-        let size = window.appWindow.clientSize
-        let scaleFactor = window.scaleFactor
+    public func size(ofSurface surface: Surface) -> SIMD2<Int> {
+        let size = surface.appWindow.clientSize
+        let scaleFactor = surface.scaleFactor
         let width = Double(size.width) / scaleFactor
         let height = Double(size.height) / scaleFactor
         let out = SIMD2(
             Int(width.rounded(.towardZero)),
-            Int(height.rounded(.towardZero)) - window.contentHeightAdjustment
+            Int(height.rounded(.towardZero)) - surface.contentHeightAdjustment
         )
         return out
     }
 
-    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
+    public func isSurfaceProgrammaticallyResizable(_ surface: Surface) -> Bool {
         // TODO: Detect whether window is fullscreen
         return true
     }
 
-    public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
-        let scaleFactor = window.scaleFactor
+    public func setSize(ofSurface surface: Surface, to newSize: SIMD2<Int>) {
+        let scaleFactor = surface.scaleFactor
         let width = scaleFactor * Double(newSize.x)
-        let height = scaleFactor * Double(newSize.y + window.contentHeightAdjustment)
+        let height = scaleFactor * Double(newSize.y + surface.contentHeightAdjustment)
         let size = UWP.SizeInt32(
             width: Int32(width.rounded(.towardZero)),
             height: Int32(height.rounded(.towardZero))
         )
-        try! window.appWindow.resizeClient(size)
+        try! surface.appWindow.resizeClient(size)
     }
 
     public func setSizeLimits(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
@@ -276,43 +275,24 @@ public final class WinUIBackend:
     }
 
     public func setResizeHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping (SIMD2<Int>) -> Void
     ) {
-        window.sizeChanged.addHandler { _, args in
+        surface.sizeChanged.addHandler { _, args in
             let size = SIMD2(
                 Int(args!.size.width.rounded(.awayFromZero)),
-                Int(args!.size.height.rounded(.awayFromZero)) - window.contentHeightAdjustment
+                Int(args!.size.height.rounded(.awayFromZero)) - surface.contentHeightAdjustment
             )
             action(size)
         }
     }
 
-    public func setTitle(ofWindow window: Window, to title: String) {
-        window.title = title
+    public func setTitle(ofSurface surface: Surface, to title: String) {
+        surface.title = title
     }
 
-    public func setBehaviors(
-        ofWindow window: Window,
-        closable: Bool,
-        minimizable: Bool,
-        resizable: Bool
-    ) {
-        // Source: https://devblogs.microsoft.com/oldnewthing/20100604-00/?p=13803
-        let hwnd = window.getHWND()!
-        let flags = if closable { MF_ENABLED } else { MF_DISABLED | MF_GRAYED }
-        EnableMenuItem(
-            GetSystemMenu(hwnd, false),
-            numericCast(SC_CLOSE),
-            numericCast(MF_BYCOMMAND | flags)
-        )
-
-        (window.appWindow.presenter as? OverlappedPresenter)?.isMinimizable = minimizable
-        (window.appWindow.presenter as? OverlappedPresenter)?.isResizable = resizable
-    }
-
-    public func setChild(ofWindow window: Window, to widget: Widget) {
-        window.setChild(widget)
+    public func setChild(ofSurface surface: Surface, to widget: Widget) {
+        surface.setChild(widget)
         try! widget.updateLayout()
         widget.actualThemeChanged.addHandler { _, _ in
             Task { @MainActor in
@@ -321,23 +301,19 @@ public final class WinUIBackend:
         }
     }
 
-    public func show(window: Window) {
-        try! window.activate()
+    public func show(surface: Surface) {
+        try! surface.activate()
     }
 
-    public func activate(window: Window) {
-        try! window.activate()
-    }
-
-    public func close(window: Window) {
-        try! window.close()
+    public func close(surface: Surface) {
+        try! surface.close()
     }
 
     public func setCloseHandler(
-        ofWindow window: Window,
+        ofSurface surface: Surface,
         to action: @escaping () -> Void
     ) {
-        window.closed.addHandler { _, _ in
+        surface.closed.addHandler { _, _ in
             action()
         }
     }
@@ -439,34 +415,6 @@ public final class WinUIBackend:
         to action: @escaping @Sendable @MainActor () -> Void
     ) {
         self.rootEnvironmentChangeHandler = action
-    }
-
-    public func computeWindowEnvironment(
-        window: Window,
-        rootEnvironment: EnvironmentValues
-    ) -> EnvironmentValues {
-        // TODO: Compute window scale factor (easy enough, but we would also have to keep
-        //   it up-to-date then, which is kinda annoying for now)
-        rootEnvironment
-            .with(\.scenePhase, window.isActive ? .active : .inactive)
-    }
-
-    public func setWindowEnvironmentChangeHandler(
-        of window: Window,
-        to action: @escaping @Sendable @MainActor () -> Void
-    ) {
-        // TODO: Notify when window scale factor changes
-
-        // NB: This event fires when the window is activated _or_ deactivated.
-        window.activated.addHandler { _, _ in
-            if let rootHandler = self.rootEnvironmentChangeHandler {
-                rootHandler()
-                // Don't bother calling `action` since this window's environment
-                // will be recomputed anyway.
-            } else {
-                action()
-            }
-        }
     }
 
     public func setIncomingURLHandler(to action: @escaping (URL) -> Void) {
@@ -1500,17 +1448,17 @@ public final class WinUIBackend:
 
     public func showAlert(
         _ alert: Alert,
-        window: Window?,
+        surface: Surface?,
         responseHandler handleResponse: @escaping (Int) -> Void
     ) {
         // WinUI only allows one dialog at a time so we limit ourselves using
         // a semaphore.
-        guard let window = window ?? windows.first else {
+        guard let surface = surface ?? windows.first else {
             logger.warning("WinUI can't show alert without window")
             return
         }
 
-        alert.xamlRoot = window.content.xamlRoot
+        alert.xamlRoot = surface.content.xamlRoot
         dialogSemaphore.wait()
         let promise = try! alert.showAsync()!
         promise.completed = { operation, status in
@@ -1534,19 +1482,19 @@ public final class WinUIBackend:
         }
     }
 
-    public func dismissAlert(_ alert: Alert, window: Window?) {
+    public func dismissAlert(_ alert: Alert, surface: Surface?) {
         try! alert.hide()
     }
 
     public func showOpenDialog(
         fileDialogOptions: FileDialogOptions,
         openDialogOptions: OpenDialogOptions,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<[URL]>) -> Void
     ) {
         let picker = FileOpenPicker()
 
-        let window = window ?? windows[0]
+        let window = surface ?? windows[0]
         let hwnd = window.getHWND()!
         let interface: SwiftIInitializeWithWindow = try! picker.thisPtr.QueryInterface()
         try! interface.initialize(with: hwnd)
@@ -1589,12 +1537,12 @@ public final class WinUIBackend:
     public func showSaveDialog(
         fileDialogOptions: FileDialogOptions,
         saveDialogOptions: SaveDialogOptions,
-        window: Window?,
+        surface: Surface?,
         resultHandler handleResult: @escaping (DialogResult<URL>) -> Void
     ) {
         let picker = FileSavePicker()
 
-        let window = window ?? windows[0]
+        let window = surface ?? windows[0]
         let hwnd = window.getHWND()!
         let interface: SwiftIInitializeWithWindow = try! picker.thisPtr.QueryInterface()
         try! interface.initialize(with: hwnd)

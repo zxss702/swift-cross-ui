@@ -31,8 +31,8 @@ public struct PresentAlertAction {
                         actionLabels: actions.map(\.label),
                         environment: environment
                     )
-                    let window = environment.window.map { $0 as! Backend.Window }
-                    backend.showAlert(alert, window: window) { actionIndex in
+                    let window = environment.window.map { $0 as! Backend.Surface }
+                    backend.showAlert(alert, surface: window) { actionIndex in
                         actions[actionIndex].action()
                         continuation.resume(returning: actionIndex)
                     }

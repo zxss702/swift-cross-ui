@@ -40,7 +40,7 @@ public struct PresentFileSaveDialogAction: Sendable {
         func chooseFile<Backend: BackendFeatures.FileSaveDialogs>(backend: Backend) async -> URL? {
             return await withCheckedContinuation { continuation in
                 backend.runInMainThread {
-                    let window = self.window.value.map { $0 as! Backend.Window }
+                    let window = self.window.value.map { $0 as! Backend.Surface }
 
                     backend.showSaveDialog(
                         fileDialogOptions: FileDialogOptions(
@@ -55,7 +55,7 @@ public struct PresentFileSaveDialogAction: Sendable {
                             nameFieldLabel: nameFieldLabel,
                             defaultFileName: defaultFileName
                         ),
-                        window: window
+                        surface: window
                     ) { result in
                         switch result {
                             case .success(let url):

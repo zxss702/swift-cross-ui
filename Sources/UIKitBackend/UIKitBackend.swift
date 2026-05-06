@@ -219,24 +219,6 @@ public final class UIKitBackend:
         }
     }
 
-    public func computeWindowEnvironment(
-        window: Window,
-        rootEnvironment: EnvironmentValues
-    ) -> EnvironmentValues {
-        // TODO: Record window scale factor in here
-        rootEnvironment
-            .with(\.scenePhase, window.isKeyWindow ? .active : .inactive)
-    }
-
-    public func setWindowEnvironmentChangeHandler(
-        of window: Window,
-        to action: @escaping @Sendable @MainActor () -> Void
-    ) {
-        // TODO: Notify when window scale factor changes
-
-        Self.onWindowEnvironmentChange = action
-    }
-
     public func runInMainThread(action: @escaping @MainActor () -> Void) {
         DispatchQueue.main.async(execute: action)
     }
