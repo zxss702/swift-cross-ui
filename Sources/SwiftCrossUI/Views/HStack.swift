@@ -3,7 +3,7 @@ public struct HStack<Content: View>: View {
     public var body: Content
 
     /// The amount of spacing to apply between children.
-    private var spacing: Int
+    private var spacing: Double
     /// The alignment of the stack's children in the vertical direction.
     private var alignment: VerticalAlignment
 
@@ -16,12 +16,27 @@ public struct HStack<Content: View>: View {
     ///   - content: The content of the stack.
     public init(
         alignment: VerticalAlignment = .center,
-        spacing: Int? = nil,
+        spacing: Double? = nil,
         @ViewBuilder _ content: () -> Content
     ) {
         body = content()
         self.spacing = spacing ?? VStack<EmptyView>.defaultSpacing
         self.alignment = alignment
+    }
+
+    public func children<Backend: BaseAppBackend>(
+        backend: Backend,
+        snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
+        environment: EnvironmentValues
+    ) -> any ViewGraphNodeChildren {
+        stackChildren(backend: backend, snapshots: snapshots, environment: environment)
+    }
+
+    public func layoutableChildren<Backend: BaseAppBackend>(
+        backend: Backend,
+        children: any ViewGraphNodeChildren
+    ) -> [LayoutSystem.LayoutableChild] {
+        stackLayoutableChildren(backend: backend, children: children)
     }
 
     public func asWidget<Backend: BaseAppBackend>(

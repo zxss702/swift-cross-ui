@@ -5,7 +5,7 @@ import Gtk
 extension GtkBackend: BackendFeatures.Widgets {
     public typealias Widget = Gtk.Widget
 
-    public var defaultPaddingAmount: Int { 10 }
+    public var defaultPaddingAmount: Double { 10 }
 
     public func show(widget: Widget) {
         widget.show()

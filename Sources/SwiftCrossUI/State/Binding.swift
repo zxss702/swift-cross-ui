@@ -50,6 +50,12 @@ public struct Binding<Value> {
         self
     }
 
+    /// Reconstructs a binding from its projected value so that the
+    /// `{ $x in ... }` closure parameter syntax works as in SwiftUI.
+    public init(projectedValue: Binding<Value>) {
+        self = projectedValue
+    }
+
     /// The stored getter.
     private let getValue: () -> Value
     /// The stored setter.
@@ -73,6 +79,15 @@ public struct Binding<Value> {
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
         self.getValue = get
         self.setValue = set
+    }
+
+    /// Creates a binding with an immutable value.
+    ///
+    /// - Parameter value: The constant value of the binding.
+    /// - Returns: A binding whose getter always returns `value` and whose
+    ///   setter does nothing.
+    public static func constant(_ value: Value) -> Binding<Value> {
+        Binding<Value>(get: { value }, set: { _ in })
     }
 
     /// Converts a `Binding<Value?>` into a `Binding<Value>?`, returning `nil`

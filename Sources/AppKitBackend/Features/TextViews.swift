@@ -118,6 +118,9 @@ extension AppKitBackend: BackendFeatures.TextViews {
 
         let nsFont: NSFont
         switch font.identifier.kind {
+            case .named(let family):
+                nsFont = NSFont(name: family, size: size)
+                    ?? NSFont.systemFont(ofSize: size, weight: weight)
             case .system:
                 switch font.design {
                     case .default:

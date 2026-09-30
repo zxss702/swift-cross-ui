@@ -23,6 +23,22 @@ public struct EitherView<A: View, B: View> {
     }
 }
 
+/// A view that transparently wraps a single active child, allowing
+/// ``EnvironmentValues/applyingModifiers(of:)`` to look through the wrapper.
+protocol TransparentWrappingView {
+    /// The wrapped view.
+    var wrappedContent: any View { get }
+}
+
+extension EitherView: TransparentWrappingView {
+    var wrappedContent: any View {
+        switch storage {
+        case .a(let view): return view
+        case .b(let view): return view
+        }
+    }
+}
+
 extension EitherView: View {
     public var _asMenuItems: [MenuItem] {
         switch storage {

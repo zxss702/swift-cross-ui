@@ -81,3 +81,14 @@ public struct ContentUnavailableView<Label: View, Description: View, Actions: Vi
         }
     }
 }
+
+extension ContentUnavailableView
+    where Label == SwiftCrossUI.Label<Text, Image>, Description == Text, Actions == EmptyView {
+    /// Creates an unavailable-content interface with a title and system
+    /// image, as in SwiftUI.
+    public init(_ title: String, systemImage: String, description: Text? = nil) {
+        self.label = SwiftCrossUI.Label(title, systemImage: systemImage)
+        self.description = description ?? Text("")
+        self.actions = EmptyView()
+    }
+}

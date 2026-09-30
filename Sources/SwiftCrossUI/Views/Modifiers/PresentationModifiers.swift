@@ -54,6 +54,12 @@ extension View {
         preference(key: \.presentationDragIndicatorVisibility, value: visibility)
     }
 
+    /// Sets the visibility of the enclosing sheet presentation's drag
+    /// indicator, as in SwiftUI.
+    public func presentationDragIndicator(_ visibility: Visibility) -> some View {
+        presentationDragIndicatorVisibility(visibility)
+    }
+
     /// Sets the background of the enclosing sheet presentation.
     ///
     /// - Parameter color: The background color to use for the enclosing sheet

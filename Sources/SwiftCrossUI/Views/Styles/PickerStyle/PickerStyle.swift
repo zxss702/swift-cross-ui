@@ -15,6 +15,18 @@ public protocol PickerStyle: Sendable {
         environment: EnvironmentValues
     ) -> Body
 
+    /// The method used to render ``Picker`` when its options carry distinct
+    /// display labels (from tagged picker content).
+    /// - Parameters:
+    ///   - labeledOptions: The options (value + optional label) to display.
+    ///   - selection: A binding to the picker's currently selected value.
+    ///   - environment: The environment the picker is being rendered in.
+    func makeView<Value: Equatable>(
+        labeledOptions: [PickerOption<Value>],
+        selection: Binding<Value?>,
+        environment: EnvironmentValues
+    ) -> Body
+
     /// A method that can be used to check whether a picker style is currently
     /// supported by a specific backend.
     ///
@@ -31,5 +43,19 @@ extension PickerStyle {
     public func isSupported<Backend: BaseAppBackend>(backend: Backend) -> Bool {
         // Custom picker styles are supported on all platforms by default.
         true
+    }
+
+    /// Default implementation ignoring option labels, for styles that render
+    /// values directly.
+    public func makeView<Value: Equatable>(
+        labeledOptions: [PickerOption<Value>],
+        selection: Binding<Value?>,
+        environment: EnvironmentValues
+    ) -> Body {
+        makeView(
+            options: labeledOptions.map(\.value),
+            selection: selection,
+            environment: environment
+        )
     }
 }

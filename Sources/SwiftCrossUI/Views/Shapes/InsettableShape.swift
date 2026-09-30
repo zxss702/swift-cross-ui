@@ -17,7 +17,7 @@ struct InsettableShapeImpl<Base: Shape>: InsettableShape {
 
     nonisolated func path(in bounds: Path.Rect) -> Path {
         base.path(
-            in: .init(
+            in: Path.Rect(
                 x: bounds.x + inset,
                 y: bounds.y + inset,
                 width: bounds.width - 2 * inset,

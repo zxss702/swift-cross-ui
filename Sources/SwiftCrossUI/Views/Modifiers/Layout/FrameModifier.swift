@@ -36,6 +36,28 @@ extension View {
     }
 
     /// Positions this view within an invisible frame having the specified
+    /// size constraints.
+    ///
+    /// - Parameters:
+    ///   - width: The frame's exact width. `nil` lets the view choose its own
+    ///     width instead.
+    ///   - height: The frame's exact height. `nil` lets the view choose its own
+    ///     height instead.
+    ///   - alignment: How to align the view within its container.
+    @_disfavoredOverload
+    public func frame(
+        width: CGFloat? = nil,
+        height: CGFloat? = nil,
+        alignment: Alignment = .center
+    ) -> some View {
+        return frame(
+            width: width.map(Double.init),
+            height: height.map(Double.init),
+            alignment: alignment
+        )
+    }
+
+    /// Positions this view within an invisible frame having the specified
     /// minimum size constraints.
     ///
     /// - Parameters:
@@ -95,6 +117,29 @@ extension View {
             minHeight: minHeight,
             idealHeight: idealHeight,
             maxHeight: maxHeight,
+            alignment: alignment
+        )
+    }
+
+    /// Positions this view within an invisible frame having the specified
+    /// size constraints.
+    @_disfavoredOverload
+    public func frame(
+        minWidth: CGFloat? = nil,
+        idealWidth: CGFloat? = nil,
+        maxWidth: CGFloat? = nil,
+        minHeight: CGFloat? = nil,
+        idealHeight: CGFloat? = nil,
+        maxHeight: CGFloat? = nil,
+        alignment: Alignment = .center
+    ) -> some View {
+        return frame(
+            minWidth: minWidth.map(Double.init),
+            idealWidth: idealWidth.map(Double.init),
+            maxWidth: maxWidth.map(Double.init),
+            minHeight: minHeight.map(Double.init),
+            idealHeight: idealHeight.map(Double.init),
+            maxHeight: maxHeight.map(Double.init),
             alignment: alignment
         )
     }
@@ -292,14 +337,42 @@ struct FlexibleFrameView<Child: View>: TypeSafeView {
         )
         let childSize = childResult.size
 
-        var frameSize = clampSize(childSize)
-        if maxWidth == .infinity, let proposedWidth = proposedSize.width {
-            frameSize.width = max(frameSize.width, proposedWidth)
+        // Match SwiftUI's semantics: when a proposal exists and a min/max
+        // constraint is set, the frame fills the proposal clamped to the
+        // constraint. A `.infinity` maximum therefore behaves as "expand to
+        // fill" and a finite maximum as "grow up to the limit". With no
+        // constraints at all the frame hugs the child.
+        func resolvedDimension(
+            proposed: Double?,
+            child: Double,
+            minimum: Double?,
+            maximum: Double?
+        ) -> Double {
+            guard let proposed else {
+                return LayoutSystem.clamp(child, minimum: minimum, maximum: maximum)
+            }
+            switch (minimum, maximum) {
+            case (nil, nil):
+                return child
+            default:
+                return LayoutSystem.clamp(proposed, minimum: minimum, maximum: maximum)
+            }
         }
 
-        if maxHeight == .infinity, let proposedHeight = proposedSize.height {
-            frameSize.height = max(frameSize.height, proposedHeight)
-        }
+        let frameSize = ViewSize(
+            resolvedDimension(
+                proposed: proposedSize.width,
+                child: childSize.width,
+                minimum: minWidth,
+                maximum: maxWidth
+            ),
+            resolvedDimension(
+                proposed: proposedSize.height,
+                child: childSize.height,
+                minimum: minHeight,
+                maximum: maxHeight
+            )
+        )
 
         return ViewLayoutResult(
             size: frameSize,

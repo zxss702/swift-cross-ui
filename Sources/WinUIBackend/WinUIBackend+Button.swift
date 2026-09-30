@@ -1,3 +1,4 @@
+import Foundation
 import SwiftCrossUI
 import WinUI
 import UWP
@@ -43,7 +44,7 @@ extension WinUIBackend {
         }
 
         let dummyButton = Button()
-        let placeholder = Canvas()
+        let placeholder = WinUI.Canvas()
         let placeholderSize = SIMD2<Double>(40, 40)
         placeholder.width = placeholderSize.x
         placeholder.height = placeholderSize.y

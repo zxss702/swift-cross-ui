@@ -41,7 +41,20 @@ extension View {
     /// within the view will no longer be clickable.
     @available(*, deprecated, renamed: "onTapGesture(gesture:perform:)")
     public func onClick(perform action: @escaping () -> Void) -> some View {
-        onTapGesture(perform: action)
+        onTapGesture(gesture: .primary, perform: action)
+    }
+
+    /// Adds an action to perform when the user taps or clicks this view a
+    /// specified number of times, as in SwiftUI.
+    ///
+    /// - Note: `count` values above 1 are currently treated as a single tap
+    ///   because the backends don't yet expose multi-tap detection.
+    @_disfavoredOverload
+    public func onTapGesture(
+        count: Int = 1,
+        perform action: @escaping () -> Void
+    ) -> some View {
+        OnTapGestureModifier(body: TupleView1(self), gesture: .primary, action: action)
     }
 }
 

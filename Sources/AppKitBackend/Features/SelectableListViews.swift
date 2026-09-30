@@ -43,7 +43,7 @@ extension AppKitBackend: BackendFeatures.SelectableListViews {
     ) -> SwiftCrossUI.EdgeInsets {
         // TODO: Figure out if there's a way to compute this more directly. At
         //   the moment these are just figures from empirical observations.
-        SwiftCrossUI.EdgeInsets(top: 0, bottom: 0, leading: 8, trailing: 8)
+        SwiftCrossUI.EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8)
     }
 
     public func minimumRowSize(ofSelectableListView listView: Widget) -> SIMD2<Int> {

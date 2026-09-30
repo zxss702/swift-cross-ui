@@ -8,7 +8,7 @@ extension BackendFeatures {
 
         /// The default amount of padding used when a user uses the
         /// ``View/padding(_:_:)`` modifier.
-        var defaultPaddingAmount: Int { get }
+        var defaultPaddingAmount: Double { get }
 
         /// Shows a widget after it has been created or updated.
         ///

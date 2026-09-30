@@ -28,6 +28,34 @@ extension View {
             sheetContent: content
         )
     }
+
+    /// Presents a sheet when the given item is non-`nil`, as in SwiftUI.
+    ///
+    /// - Parameters:
+    ///   - item: A binding to the item whose non-`nil` value presents the
+    ///     sheet. Setting it back to `nil` dismisses the sheet.
+    ///   - onDismiss: An action to perform when the sheet is dismissed
+    ///     by the user.
+    ///   - content: A builder that produces the sheet's content from the
+    ///     unwrapped item.
+    public func sheet<Item, SheetContent: View>(
+        item: Binding<Item?>,
+        onDismiss: (() -> Void)? = nil,
+        @ViewBuilder content: @escaping (Item) -> SheetContent
+    ) -> some View {
+        sheet(
+            isPresented: Binding(
+                get: { item.wrappedValue != nil },
+                set: { newValue in
+                    if !newValue {
+                        item.wrappedValue = nil
+                    }
+                }
+            ),
+            onDismiss: onDismiss,
+            content: { content(item.wrappedValue!) }
+        )
+    }
 }
 
 struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {

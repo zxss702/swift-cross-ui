@@ -1,11 +1,18 @@
 /// Alignment of items layed out along the vertical axis.
-public enum VerticalAlignment: Sendable {
+public enum VerticalAlignment: Sendable, Hashable {
     /// Top alignment.
     case top
     /// Center alignment.
     case center
     /// Bottom alignment.
     case bottom
+    /// Alignment along the first text baseline. Currently treated like
+    /// ``bottom`` during stack layout; font-metric-aware baseline alignment
+    /// is planned for a future release.
+    case firstTextBaseline
+    /// Alignment along the last text baseline. Currently treated like
+    /// ``bottom`` during stack layout.
+    case lastTextBaseline
 
     /// Converts this value to a ``StackAlignment``.
     var asStackAlignment: StackAlignment {
@@ -14,7 +21,7 @@ public enum VerticalAlignment: Sendable {
                 .leading
             case .center:
                 .center
-            case .bottom:
+            case .bottom, .firstTextBaseline, .lastTextBaseline:
                 .trailing
         }
     }
@@ -28,7 +35,8 @@ public enum VerticalAlignment: Sendable {
         switch self {
             case .top: 0
             case .center: (frameHeight - childHeight) / 2
-            case .bottom: frameHeight - childHeight
+            case .bottom, .firstTextBaseline, .lastTextBaseline:
+                frameHeight - childHeight
         }
     }
 }

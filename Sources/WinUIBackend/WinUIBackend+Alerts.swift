@@ -76,6 +76,18 @@ extension WinUIBackend: BackendFeatures.Alerts {
         }
     }
 
+    public func updateAlertBody(
+        _ alert: Alert,
+        body: String?,
+        environment: EnvironmentValues
+    ) {
+        guard let body else { return }
+        let textBlock = WinUI.TextBlock()
+        textBlock.text = body
+        textBlock.textWrapping = .wrap
+        alert.content = textBlock
+    }
+
     public func showAlert(
         _ alert: Alert,
         window: Window?,

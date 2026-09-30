@@ -107,6 +107,18 @@ extension ProgressView where Label == EmptyView {
         self.kind = .bar
         self.progress = value.map { Double($0) }
     }
+
+    /// Creates a progress bar for tracking a task with a defined total amount
+    /// of work, as in SwiftUI.
+    ///
+    /// - Parameters:
+    ///   - value: The completed progress of the task so far.
+    ///   - total: The total amount of work required to complete the task.
+    public init<Value: BinaryFloatingPoint>(value: Value, total: Value) {
+        self.label = EmptyView()
+        self.kind = .bar
+        self.progress = Double(value / total)
+    }
 }
 
 extension ProgressView where Label == Text {
@@ -235,5 +247,54 @@ struct ProgressBarView: ElementaryView {
     ) {
         backend.updateProgressBar(widget, progressFraction: value, environment: environment)
         backend.setSize(of: widget, to: layout.size.vector)
+    }
+}
+
+/// A type that applies a custom appearance to progress views, as in SwiftUI.
+public protocol ProgressViewStyle: Sendable {}
+
+/// A progress view style that renders as a spinning indicator.
+public struct CircularProgressViewStyle: ProgressViewStyle {
+    public init() {}
+}
+
+/// A progress view style that renders as a bar.
+public struct LinearProgressViewStyle: ProgressViewStyle {
+    public init() {}
+}
+
+/// The default progress view style for the current context.
+public struct AutomaticProgressViewStyle: ProgressViewStyle {
+    public init() {}
+}
+
+extension ProgressViewStyle where Self == CircularProgressViewStyle {
+    /// The circular progress view style.
+    public static var circular: CircularProgressViewStyle { .init() }
+}
+
+extension ProgressViewStyle where Self == LinearProgressViewStyle {
+    /// The linear progress view style.
+    public static var linear: LinearProgressViewStyle { .init() }
+}
+
+extension ProgressViewStyle where Self == AutomaticProgressViewStyle {
+    /// The automatic progress view style.
+    public static var automatic: AutomaticProgressViewStyle { .init() }
+}
+
+extension ProgressView {
+    /// Sets the style for progress views within this view.
+    ///
+    /// Applied directly to this progress view; views nested deeper are
+    /// unaffected (environmental style propagation is pending).
+    public func progressViewStyle<S: ProgressViewStyle>(_ style: S) -> ProgressView<Label> {
+        var copy = self
+        if style is LinearProgressViewStyle {
+            copy.kind = .bar
+        } else if style is CircularProgressViewStyle {
+            copy.kind = .spinner
+        }
+        return copy
     }
 }

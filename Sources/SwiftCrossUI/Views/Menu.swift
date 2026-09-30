@@ -8,6 +8,9 @@ public struct Menu {
     /// The menu's items.
     public var items: [MenuItem]
 
+    /// A custom view label, when created via ``init(content:label:)``.
+    var labelContent: (() -> AnyView)?
+
     var buttonWidth: Int?
 
     /// Creates a menu.
@@ -19,6 +22,23 @@ public struct Menu {
     public init(_ label: String, @ViewBuilder items: () -> some View) {
         self.label = label
         self.items = items()._asMenuItems
+        self.labelContent = nil
+    }
+
+    /// Creates a menu with a custom view label.
+    ///
+    /// - Parameters:
+    ///   - content: The menu's items.
+    ///   - label: The menu's label.
+    @MainActor
+    public init<Content: View, Label: View>(
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.label = ""
+        self.items = content()._asMenuItems
+        let labelView = label()
+        self.labelContent = { AnyView(labelView) }
     }
 
     /// Resolves the menu to a representation used by backends.
@@ -70,13 +90,25 @@ extension Menu: TypeSafeView {
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
     ) -> Children {
-        MenuStorage()
+        let storage = MenuStorage()
+        if let labelContent {
+            storage.labelChildren = TupleViewChildren1(
+                labelContent(),
+                backend: backend,
+                snapshots: nil,
+                environment: environment
+            )
+        }
+        return storage
     }
 
     func asWidget<Backend: BaseAppBackend>(
         _ children: MenuStorage,
         backend: Backend
     ) -> Backend.Widget {
+        if let labelChildren = children.labelChildren {
+            return backend.createButton(wrapping: labelChildren.child0.widget.into())
+        }
         return backend.createSimpleButton()
     }
 
@@ -98,6 +130,34 @@ extension Menu: TypeSafeView {
         // TODO: Look into ways to predict a button's natural size without
         //   updating its content so that computeLayout can be a bit more of
         //   a pure function.
+
+        if let labelChildren = children.labelChildren {
+            let buttonPadding = backend.buttonPadding(in: environment)
+            let childEnvironment = backend.computeButtonLabelEnvironment(from: environment)
+            let childResult = labelChildren.child0.computeLayout(
+                with: labelContent!(),
+                proposedSize: proposedSize,
+                environment: childEnvironment
+            )
+            backend.updateButton(widget, environment: environment, action: {})
+            let size = SIMD2(
+                LayoutSystem.roundSize(childResult.size.width) + buttonPadding.x,
+                LayoutSystem.roundSize(childResult.size.height) + buttonPadding.y
+            )
+            switch backend.menuImplementationStyle {
+                case .menuButton(let backend):
+                    let menu =
+                        children.menu.flatMap { $0 as? NewBackend.Menu }
+                            ?? backend.createPopoverMenu()
+                    children.menu = menu
+                    backend.setButtonMenu(widget, menu: menu, environment: environment)
+                case .dynamicPopover:
+                    break
+            }
+            return ViewLayoutResult
+                .leafView(size: ViewSize(size))
+                .with(\.isNeverFocusable, false)
+        }
 
         // Update the button before measuring its natural size
         switch backend.menuImplementationStyle {
@@ -141,6 +201,46 @@ extension Menu: TypeSafeView {
     ) {
         let size = layout.size
         backend.setSize(of: widget, to: size.vector)
+
+        if let labelChildren = children.labelChildren {
+            _ = labelChildren.child0.commit()
+            switch backend.menuImplementationStyle {
+                case .dynamicPopover(let backend):
+                    backend.updateButton(
+                        widget,
+                        environment: environment,
+                        action: {
+                            let content = resolve().content
+                            let menu = backend.createPopoverMenu()
+                            children.menu = menu
+                            backend.updatePopoverMenu(
+                                menu,
+                                content: content,
+                                environment: environment
+                            )
+                            backend.showPopoverMenu(
+                                menu,
+                                at: SIMD2(0, LayoutSystem.roundSize(size.height) + 2),
+                                relativeTo: widget
+                            ) {
+                                children.menu = nil
+                            }
+                        }
+                    )
+                case .menuButton(let backend):
+                    let content = resolve().content
+                    let menu =
+                        (children.menu as? NewBackend.Menu) ?? backend.createPopoverMenu()
+                    children.menu = menu
+                    backend.updatePopoverMenu(
+                        menu,
+                        content: content,
+                        environment: environment
+                    )
+                    backend.setButtonMenu(widget, menu: menu, environment: environment)
+            }
+            return
+        }
 
         switch backend.menuImplementationStyle {
             case .dynamicPopover(let backend):
@@ -213,9 +313,14 @@ extension Menu: TypeSafeView {
 
 class MenuStorage: ViewGraphNodeChildren {
     var menu: Any?
+    var labelChildren: TupleViewChildren1<AnyView>?
 
-    var widgets: [AnyWidget] = []
-    var erasedNodes: [ErasedViewGraphNode] = []
+    var widgets: [AnyWidget] {
+        labelChildren?.widgets ?? []
+    }
+    var erasedNodes: [ErasedViewGraphNode] {
+        labelChildren?.erasedNodes ?? []
+    }
 
     init() {}
 }

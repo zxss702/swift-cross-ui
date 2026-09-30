@@ -139,7 +139,78 @@ extension View {
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
     ) -> any ViewGraphNodeChildren {
-        body.children(backend: backend, snapshots: snapshots, environment: environment)
+        if body is any TupleView || Content.self == EmptyView.self {
+            // Tuple views and empty views never require a backend widget of
+            // their own, so flattening them into this node's children is safe.
+            return body.children(
+                backend: backend,
+                snapshots: snapshots,
+                environment: environment
+            )
+        } else {
+            // Give `body` its own view graph node so that views with
+            // specialised backend widgets (such as `ScrollView`, `SplitView`,
+            // and `Shape`) actually get their real widget. Flattening them
+            // would feed this node's plain container to their layout and
+            // commit code, which generally assumes a specific widget type.
+            return TupleViewChildren1(
+                body,
+                backend: backend,
+                snapshots: snapshots,
+                environment: environment
+            )
+        }
+    }
+
+    /// A `children` implementation for stack-like containers (such as
+    /// ``VStack``/``HStack``/``ZStack``/``Group``). Wraps single non-tuple
+    /// content in a view graph node so that modifiers and conditional content
+    /// used as a stack's entire content keep their own widget and layout
+    /// behaviour (they'd otherwise be flattened into the stack's children and
+    /// skipped entirely, e.g. `VStack { Text("x").padding() }`).
+    func stackChildren<Backend: BaseAppBackend>(
+        backend: Backend,
+        snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
+        environment: EnvironmentValues
+    ) -> any ViewGraphNodeChildren {
+        if body is any TupleView || Content.self == EmptyView.self {
+            return defaultChildren(
+                backend: backend,
+                snapshots: snapshots,
+                environment: environment
+            )
+        } else {
+            return TupleViewChildren1(
+                body,
+                backend: backend,
+                snapshots: snapshots,
+                environment: environment
+            )
+        }
+    }
+
+    /// A `layoutableChildren` implementation for stack-like containers;
+    /// counterpart to ``stackChildren``.
+    func stackLayoutableChildren<Backend: BaseAppBackend>(
+        backend: Backend,
+        children: any ViewGraphNodeChildren
+    ) -> [LayoutSystem.LayoutableChild] {
+        if let children = children as? TupleViewChildren1<Content> {
+            return [
+                LayoutSystem.LayoutableChild(
+                    computeLayout: { proposedSize, environment in
+                        children.child0.computeLayout(
+                            with: body,
+                            proposedSize: proposedSize,
+                            environment: environment
+                        )
+                    },
+                    commit: { children.child0.commit() },
+                    tag: "\(Content.self)"
+                )
+            ]
+        }
+        return body.layoutableChildren(backend: backend, children: children)
     }
 
     public func layoutableChildren<Backend: BaseAppBackend>(
@@ -156,7 +227,7 @@ extension View {
         backend: Backend,
         children: any ViewGraphNodeChildren
     ) -> [LayoutSystem.LayoutableChild] {
-        body.layoutableChildren(backend: backend, children: children)
+        stackLayoutableChildren(backend: backend, children: children)
     }
 
     public func asWidget<Backend: BaseAppBackend>(
@@ -172,6 +243,12 @@ extension View {
         _ children: any ViewGraphNodeChildren,
         backend: Backend
     ) -> Backend.Widget {
+        if let children = children as? TupleViewChildren1<Content> {
+            // `body` got its own node; wrap its widget in a plain container.
+            let container = backend.createContainer()
+            backend.insert(children.child0.widget.into(), into: container, at: 0)
+            return container
+        }
         let vStack = VStack(content: body)
         return vStack.asWidget(children, backend: backend)
     }
@@ -201,6 +278,15 @@ extension View {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
+        if let children = children as? TupleViewChildren1<Content> {
+            // `body` is a node of its own; defer to it entirely so that the
+            // node's own widget (not this container) gets laid out.
+            return children.child0.computeLayout(
+                with: body,
+                proposedSize: proposedSize,
+                environment: environment
+            )
+        }
         return body.computeLayout(
             widget,
             children: children,
@@ -233,7 +319,13 @@ extension View {
         environment: EnvironmentValues,
         backend: Backend
     ) {
-        return body.commit(
+        if let children = children as? TupleViewChildren1<Content> {
+            _ = children.child0.commit()
+            backend.setSize(of: widget, to: layout.size.vector)
+            backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+            return
+        }
+        body.commit(
             widget,
             children: children,
             layout: layout,

@@ -40,6 +40,13 @@ public struct State<Value>: ObservableProperty {
         implementation = StateImpl(initialStorage: Storage(initialValue))
     }
 
+    /// Creates a `State` given an initial value.
+    ///
+    /// - Parameter initialValue: The state's initial value.
+    public init(initialValue: Value) {
+        self.init(wrappedValue: initialValue)
+    }
+
     public func update(with environment: EnvironmentValues, previousValue: State<Value>?) {
         implementation.update(with: environment, previousValue: previousValue?.implementation)
     }

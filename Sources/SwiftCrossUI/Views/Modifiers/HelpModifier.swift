@@ -14,7 +14,7 @@ struct HelpView<Content: View>: View, TypeSafeView {
     var helpText: String
     var content: Content
 
-    var body: TupleView1<Content> { content }
+    var body: TupleView1<Content> { TupleView1(content) }
 
     typealias Children = TupleView1<Content>.Children
 

@@ -1,4 +1,4 @@
-import Foundation
+@_exported import Foundation
 import Logging
 
 /// Backing storage for `logger`.

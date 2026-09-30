@@ -1,3 +1,5 @@
+import Foundation
+
 /// A view the displays text.
 ///
 /// ``Text`` truncates its content to fit within its proposed size. To wrap
@@ -48,11 +50,146 @@ public struct Text: Sendable {
     /// The string to be shown in the text view.
     public private(set) var string: String
 
+    /// An explicit font for the text, overriding the font from the
+    /// environment. Used by text-level modifiers such as ``font(_:)``
+    /// and ``bold()``.
+    var storedFont: Font?
+
+    /// An explicit foreground color for the text, overriding the color
+    /// from the environment.
+    var storedForegroundColor: Color?
+
+    /// Whether the text is rendered struck through. `nil` inherits the
+    /// environment's value.
+    var isStrikethrough: Bool? = nil
+
+    /// Whether the text is rendered underlined. `nil` inherits the
+    /// environment's value.
+    var isUnderline: Bool? = nil
+
     /// Creates a new text view that displays a string.
     ///
     /// - Parameter string: The string to display.
     public init(_ string: String) {
         self.string = string
+    }
+
+    /// Creates a new text view that displays a string-like value such as a
+    /// `Substring`.
+    ///
+    /// - Parameter content: The string content to display.
+    public init<S: StringProtocol>(_ content: S) {
+        self.string = String(content)
+    }
+
+    /// Creates a new text view that displays an attributed string, as in
+    /// SwiftUI.
+    ///
+    /// Attribute runs are currently flattened to plain text; rich run
+    /// support is planned for a future release.
+    public init(_ attributedContent: AttributedString) {
+        self.string = String(attributedContent.characters)
+    }
+
+    /// Creates a text view that displays a value formatted by the given
+    /// format style.
+    ///
+    /// - Parameters:
+    ///   - input: The value to display.
+    ///   - format: The format style used to convert the value to a string.
+    public init<Input, F: FormatStyle>(
+        _ input: Input,
+        format: F
+    ) where F.FormatInput == Input, F.FormatOutput == String {
+        self.string = format.format(input)
+    }
+
+    /// Concatenates two text views. Styling attributes that don't fit in
+    /// a single string's per-view environment (e.g. runs with different
+    /// fonts) are collapsed to the left-hand side's attributes. Rich run
+    /// support is planned for a future release.
+    public static func + (lhs: Text, rhs: Text) -> Text {
+        var result = Text(lhs.string + rhs.string)
+        result.storedFont = lhs.storedFont ?? rhs.storedFont
+        result.storedForegroundColor = lhs.storedForegroundColor ?? rhs.storedForegroundColor
+        return result
+    }
+
+    /// Applies an explicit font to this text.
+    public func font(_ font: Font) -> Text {
+        var copy = self
+        copy.storedFont = font
+        return copy
+    }
+
+    /// Applies a font weight to this text.
+    public func fontWeight(_ weight: Font.Weight?) -> Text {
+        var copy = self
+        copy.storedFont = (copy.storedFont ?? .body).weight(weight)
+        return copy
+    }
+
+    /// Applies a font design to this text.
+    public func fontDesign(_ design: Font.Design?) -> Text {
+        var copy = self
+        copy.storedFont = (copy.storedFont ?? .body).design(design)
+        return copy
+    }
+
+    /// Applies a bold weight to this text.
+    public func bold() -> Text {
+        fontWeight(.bold)
+    }
+
+    /// Applies an italic style to this text.
+    public func italic() -> Text {
+        var copy = self
+        copy.storedFont = (copy.storedFont ?? .body).italic()
+        return copy
+    }
+
+    /// Applies a monospaced design to this text.
+    public func monospaced() -> Text {
+        fontDesign(.monospaced)
+    }
+
+    /// Applies a foreground color to this text.
+    public func foregroundColor(_ color: Color) -> Text {
+        var copy = self
+        copy.storedForegroundColor = color
+        return copy
+    }
+
+    /// Applies a strikethrough decoration to this text.
+    public func strikethrough(_ active: Bool = true, color: Color? = nil) -> Text {
+        var copy = self
+        copy.isStrikethrough = active
+        return copy
+    }
+
+    /// Applies an underline decoration to this text.
+    public func underline(_ active: Bool = true, color: Color? = nil) -> Text {
+        var copy = self
+        copy.isUnderline = active
+        return copy
+    }
+
+    /// Applies the stored styling attributes to the given environment.
+    func environmentApplyingTextAttributes(to environment: EnvironmentValues) -> EnvironmentValues {
+        var environment = environment
+        if let storedFont {
+            environment = environment.with(\.font, storedFont)
+        }
+        if let storedForegroundColor {
+            environment = environment.with(\.foregroundColor, storedForegroundColor)
+        }
+        if let isStrikethrough {
+            environment = environment.with(\.textStrikethrough, isStrikethrough)
+        }
+        if let isUnderline {
+            environment = environment.with(\.textUnderline, isUnderline)
+        }
+        return environment
     }
 }
 
@@ -75,6 +212,7 @@ extension Text: ElementaryView {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
+        let environment = environmentApplyingTextAttributes(to: environment)
         let transformedString = environment.applyingTextTransforms(to: string)
 
         // TODO: Avoid this. Move it to commit once we figure out a solution for Gtk.

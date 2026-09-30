@@ -34,6 +34,22 @@ extension BackendFeatures {
             environment: EnvironmentValues
         )
 
+        /// Updates the body text of an alert created via ``createAlert()``.
+        ///
+        /// The default implementation ignores the body; backends that support
+        /// body text may override this to display it (e.g. WinUI's
+        /// `ContentDialog.content`).
+        ///
+        /// - Parameters:
+        ///   - alert: The alert to update.
+        ///   - body: The alert's body text.
+        ///   - environment: The current environment.
+        func updateAlertBody(
+            _ alert: Alert,
+            body: String?,
+            environment: EnvironmentValues
+        )
+
         /// Shows an alert as a modal on top of or within the given window.
         ///
         /// Users should be unable to interact with the parent window until the
@@ -66,4 +82,13 @@ extension BackendFeatures {
         ///   - window: The window the alert is attached to, if any.
         func dismissAlert(_ alert: Alert, window: Window?)
     }
+}
+
+extension BackendFeatures.Alerts {
+    /// Default implementation: body text is ignored.
+    public func updateAlertBody(
+        _ alert: Alert,
+        body: String?,
+        environment: EnvironmentValues
+    ) {}
 }

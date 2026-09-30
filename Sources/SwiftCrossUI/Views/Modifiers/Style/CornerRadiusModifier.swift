@@ -8,7 +8,7 @@ struct CornerRadiusModifier<Content: View>: View, TypeSafeView {
     var content: Content
     var cornerRadius: Int
 
-    var body: TupleView1<Content> { content }
+    var body: TupleView1<Content> { TupleView1(content) }
 
     typealias Children = TupleView1<Content>.Children
 

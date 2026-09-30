@@ -31,6 +31,12 @@ public struct PreferenceValues: Sendable {
     /// The background color for enclosing sheets.
     public var presentationBackground: Color?
 
+    /// The window background color requested by content via
+    /// ``View/windowBackground(_:)``. Propagates up to ``WindowReference``,
+    /// which forwards it to the backend through
+    /// ``EnvironmentValues/windowBackgroundColor``.
+    public var windowBackground: Color?
+
     /// Sets the preferred color scheme for the nearest enclosing presentation.
     public var preferredColorScheme: ColorScheme?
 
@@ -82,6 +88,7 @@ extension PreferenceValues {
         presentationDragIndicatorVisibility =
             children.compactMap(\.presentationDragIndicatorVisibility).first
         presentationBackground = children.compactMap(\.presentationBackground).first
+        windowBackground = children.compactMap(\.windowBackground).first
         preferredColorScheme = children.compactMap(\.preferredColorScheme).first
         interactiveDismissDisabled = children.compactMap(\.interactiveDismissDisabled).first
 

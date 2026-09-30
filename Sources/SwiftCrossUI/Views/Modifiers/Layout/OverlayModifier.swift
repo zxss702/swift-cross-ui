@@ -10,6 +10,20 @@ extension View {
     ) -> some View {
         OverlayModifier(content: self, overlay: content(), alignment: alignment)
     }
+
+    /// Layers the given view in front of this view, as in SwiftUI's
+    /// `overlay(_:alignment:)` overload.
+    ///
+    /// - Parameters:
+    ///   - overlay: The view to layer in front of this view.
+    ///   - alignment: The alignment used to position the overlay relative to
+    ///     this view.
+    public func overlay<Overlay: View>(
+        _ overlay: Overlay,
+        alignment: Alignment = .center
+    ) -> some View {
+        OverlayModifier(content: self, overlay: overlay, alignment: alignment)
+    }
 }
 
 struct OverlayModifier<Content: View, Overlay: View>: TypeSafeView {

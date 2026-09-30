@@ -1,11 +1,11 @@
 /// A view that arranges its subviews vertically.
 public struct VStack<Content: View>: View {
-    static var defaultSpacing: Int { 10 }
+    static var defaultSpacing: Double { 10 }
 
     public var body: Content
 
     /// The amount of spacing to apply between children.
-    private var spacing: Int
+    private var spacing: Double
     /// The alignment of the stack's children in the horizontal direction.
     private var alignment: HorizontalAlignment
 
@@ -18,7 +18,7 @@ public struct VStack<Content: View>: View {
     ///   - content: The content of the stack.
     public init(
         alignment: HorizontalAlignment = .center,
-        spacing: Int? = nil,
+        spacing: Double? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.init(alignment: alignment, spacing: spacing, content: content())
@@ -33,12 +33,27 @@ public struct VStack<Content: View>: View {
     ///   - content: The content of the stack.
     init(
         alignment: HorizontalAlignment = .center,
-        spacing: Int? = nil,
+        spacing: Double? = nil,
         content: Content
     ) {
         body = content
         self.spacing = spacing ?? Self.defaultSpacing
         self.alignment = alignment
+    }
+
+    public func children<Backend: BaseAppBackend>(
+        backend: Backend,
+        snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
+        environment: EnvironmentValues
+    ) -> any ViewGraphNodeChildren {
+        stackChildren(backend: backend, snapshots: snapshots, environment: environment)
+    }
+
+    public func layoutableChildren<Backend: BaseAppBackend>(
+        backend: Backend,
+        children: any ViewGraphNodeChildren
+    ) -> [LayoutSystem.LayoutableChild] {
+        stackLayoutableChildren(backend: backend, children: children)
     }
 
     public func asWidget<Backend: BaseAppBackend>(

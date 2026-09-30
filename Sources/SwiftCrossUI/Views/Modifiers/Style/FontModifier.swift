@@ -5,6 +5,7 @@ extension View {
     /// which override the font properties of all contained text.
     ///
     /// - Parameter font: The font to set.
+    @_disfavoredOverload
     public func font(_ font: Font) -> some View {
         EnvironmentModifier(self) { environment in
             environment.with(\.font, font)

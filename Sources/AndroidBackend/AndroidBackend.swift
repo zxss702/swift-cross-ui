@@ -99,7 +99,7 @@ public final class AndroidBackend: BaseAppBackend {
     // .phone is a placeholder value -- the real value is set in `computeRootEnvironment`.
     public private(set) var deviceClass = DeviceClass.phone
 
-    public let defaultPaddingAmount = 10
+    public let defaultPaddingAmount: Double = 10
     public let supportsMultipleWindows = false
     public let canOverrideWindowColorScheme = false
     public let restoresWindowFrames = false

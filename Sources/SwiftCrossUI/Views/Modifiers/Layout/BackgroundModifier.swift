@@ -20,6 +20,38 @@ extension View {
         let zstack = ZStack(alignment: alignment, content: content)
         return BackgroundModifier(background: zstack, foreground: self)
     }
+
+    /// Sets the background of this view to a shape filled with the given
+    /// style.
+    ///
+    /// - Parameters:
+    ///   - style: The style used to fill the shape.
+    ///   - shape: The shape to draw behind this view.
+    ///   - fillStyle: The fill style applied to the shape.
+    public func background<S: ShapeStyle, ContentShape: Shape>(
+        _ style: S,
+        in shape: ContentShape,
+        fillStyle: GraphicsContext.FillStyle = GraphicsContext.FillStyle()
+    ) -> some View {
+        // Styles that are themselves views (gradients) render natively,
+        // clipped to the shape.
+        if let view = style as? any View {
+            AnyView(background(AnyView(view).clipShape(shape)))
+        } else {
+            AnyView(background(shape.fill(style)))
+        }
+    }
+
+    /// Sets the background of this view to a rectangle filled with the given
+    /// style.
+    @_disfavoredOverload
+    public func background<S: ShapeStyle>(_ style: S) -> some View {
+        if let view = style as? any View {
+            AnyView(background(AnyView(view)))
+        } else {
+            AnyView(background(Rectangle().fill(style)))
+        }
+    }
 }
 
 struct BackgroundModifier<Background: View, Foreground: View>: TypeSafeView {

@@ -134,6 +134,32 @@ public struct Font: Hashable, Sendable {
         return font
     }
 
+    /// Returns a copy of this font with bold weight applied.
+    public func bold() -> Font {
+        weight(.bold)
+    }
+
+    /// Returns a copy of this font with italic styling applied.
+    public func italic() -> Font {
+        italic(true)
+    }
+
+    /// Creates a font with the given name at a fixed point size.
+    ///
+    /// Falls back to the system font when the named font isn't available;
+    /// the family name is preserved in the resolved font's identifier.
+    public static func custom(_ name: String, size: Double) -> Font {
+        Font(kind: .concrete(identifier: .named(name), size: size))
+    }
+
+    /// Creates a font with the given name at a fixed point size.
+    ///
+    /// Equivalent to ``custom(_:size:)``; the `fixedSize` label mirrors
+    /// SwiftUI.
+    public static func custom(_ name: String, fixedSize size: Double) -> Font {
+        custom(name, size: size)
+    }
+
     private var kind: Kind
     private var overlay = Overlay()
 
@@ -259,8 +285,15 @@ public struct Font: Hashable, Sendable {
             /// The system font.
             public static let system = Self(kind: .system)
 
+            /// A font identified by family name (e.g. via ``Font/custom(_:size:)``).
+            /// Backends without custom-font support fall back to the system font.
+            public static func named(_ family: String) -> Self {
+                Self(kind: .named(family))
+            }
+
             @_spi(Backends) public enum Kind: Hashable, Sendable {
                 case system
+                case named(String)
             }
         }
 
@@ -291,10 +324,10 @@ public struct Font: Hashable, Sendable {
         switch kind {
             case .concrete(let identifier, let size, let weight, let design):
                 switch identifier.kind {
-                    case .system:
+                    case .system, .named:
                         emphasizedWeight = .bold
                         resolved = Resolved(
-                            identifier: .system,
+                            identifier: identifier,
                             pointSize: size,
                             // TODO: Research which line height ratio would be
                             //   the best default (or any alternatives to a

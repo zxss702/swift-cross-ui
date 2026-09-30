@@ -42,14 +42,16 @@ struct StateImpl<Storage: StateStorageProtocol> {
     }
 
     var projectedValue: Binding<Storage.Value> {
-        // Specifically link the binding to the inner storage instead of the
-        // outer box which changes with each view update.
-        let storage = storage
+        // Specifically link the binding to the box instead of the storage
+        // itself: `update(with:previousValue:)` swaps the box's storage, and
+        // bindings created before that swap must follow it to keep publishing
+        // changes to the storage the view graph actually observes.
+        let box = box
         return Binding(
-            get: { storage.value },
+            get: { box.value.value },
             set: { newValue in
-                storage.value = newValue
-                storage.postSet()
+                box.value.value = newValue
+                box.value.postSet()
             }
         )
     }

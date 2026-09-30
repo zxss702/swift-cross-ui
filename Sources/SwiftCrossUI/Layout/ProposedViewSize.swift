@@ -39,10 +39,15 @@ public struct ProposedViewSize: Hashable, Sendable {
 
     /// Replaces unspecified dimensions of a proposed view size with dimensions
     /// from a concrete view size to get a concrete proposal.
+    ///
+    /// Non-finite proposals (`.infinity`, `.nan`) are treated as unspecified:
+    /// a measured size must always be finite, and e.g. a `ScrollView`
+    /// proposing an unbounded axis must not cause resizable views such as
+    /// `Color` or `Image` to claim infinite size.
     public func replacingUnspecifiedDimensions(by size: ViewSize) -> ViewSize {
         ViewSize(
-            width ?? size.width,
-            height ?? size.height
+            width.flatMap { $0.isFinite ? $0 : nil } ?? size.width,
+            height.flatMap { $0.isFinite ? $0 : nil } ?? size.height
         )
     }
 

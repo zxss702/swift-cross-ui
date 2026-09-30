@@ -82,7 +82,7 @@ public final class GtkBackend {
         )
         let font = environment.resolvedFont
         switch font.identifier.kind {
-            case .system:
+            case .system, .named:
                 properties.append(.fontSize(font.pointSize))
                 // For some reason I had to tweak these a bit to make them match
                 // up with AppKit's font weights. I didn't have to do that for

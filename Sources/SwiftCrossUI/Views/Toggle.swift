@@ -7,6 +7,8 @@ public struct Toggle: View {
 
     /// The label to be shown on or beside the toggle.
     var label: String
+    /// A view label to be shown instead of `label`, if provided.
+    var labelView: (() -> AnyView)?
     /// Whether the toggle is active or not.
     var active: Binding<Bool>
 
@@ -22,6 +24,21 @@ public struct Toggle: View {
     ///   - active: Whether the toggle is active or not.
     public init(_ label: String, isOn active: Binding<Bool>) {
         self.label = label
+        self.labelView = nil
+        self.active = active
+    }
+
+    /// Creates a toggle that displays a custom view label.
+    ///
+    /// - Parameters:
+    ///   - isOn: Whether the toggle is active or not.
+    ///   - label: The view to be shown on or beside the toggle.
+    public init<Label: View>(
+        isOn active: Binding<Bool>,
+        @ViewBuilder label: @escaping () -> Label
+    ) {
+        self.label = ""
+        self.labelView = { AnyView(label()) }
         self.active = active
     }
 
@@ -29,17 +46,32 @@ public struct Toggle: View {
         switch toggleStyle.style {
             case .switch:
                 HStack {
-                    Text(label)
+                    if let labelView {
+                        labelView()
+                    } else {
+                        Text(label)
+                    }
 
                     HorizontalControlSpacer()
 
                     ToggleSwitch(isOn: active)
                 }
             case .button:
-                ToggleButton(label, isOn: active)
+                if let labelView {
+                    Button(
+                        action: { active.wrappedValue.toggle() },
+                        label: { labelView() }
+                    )
+                } else {
+                    ToggleButton(label, isOn: active)
+                }
             case .checkbox:
                 HStack {
-                    Text(label)
+                    if let labelView {
+                        labelView()
+                    } else {
+                        Text(label)
+                    }
 
                     HorizontalControlSpacer()
 

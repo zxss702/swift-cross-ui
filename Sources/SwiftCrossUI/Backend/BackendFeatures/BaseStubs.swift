@@ -414,7 +414,7 @@ extension BackendFeatures.BaseStubs {
         todo()
     }
 
-    public var defaultPaddingAmount: Int {
+    public var defaultPaddingAmount: Double {
         todo()
     }
 

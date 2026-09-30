@@ -11,7 +11,7 @@ extension DummyBackend: BackendFeatures.SelectableListViews {
     ) {}
 
     public func baseItemPadding(ofSelectableListView listView: Widget) -> EdgeInsets {
-        EdgeInsets(top: 0, bottom: 0, leading: 0, trailing: 0)
+        EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
     }
 
     public func minimumRowSize(ofSelectableListView listView: Widget) -> SIMD2<Int> {

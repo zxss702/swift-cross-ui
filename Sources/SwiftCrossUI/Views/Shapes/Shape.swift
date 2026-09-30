@@ -1,8 +1,10 @@
+import Foundation
+
 /// A 2D shape that can be drawn as a view.
 ///
 /// If no stroke color or fill color is specified, the default is no stroke and
 /// a fill of the current foreground color.
-public protocol Shape: View, Sendable, _RemoveGlobalActorIsolation where Content == EmptyView {
+public protocol Shape: View, Sendable, _RemoveGlobalActorIsolation, Animatable where Content == EmptyView {
     /// Draw the path for this shape.
     ///
     /// The bounds passed to a shape that is immediately drawn as a view will
@@ -38,6 +40,15 @@ public protocol Shape: View, Sendable, _RemoveGlobalActorIsolation where Content
     /// - Parameter bounds: The bounds of this shape.
     func path(in bounds: Path.Rect) -> Path
 
+    /// Draw the path for this shape, using SwiftUI's `CGRect` signature.
+    ///
+    /// Conforming types may implement either this overload or
+    /// ``path(in:)-7kq2m``; each has a default implementation that forwards
+    /// to the other. A type implementing neither will recurse at runtime.
+    ///
+    /// - Parameter bounds: The bounds of this shape.
+    func path(in bounds: CGRect) -> Path
+
     /// Determine the ideal size of this shape given the proposed bounds.
     ///
     /// The default implementation accepts the proposal, replacing unspecified
@@ -50,6 +61,22 @@ public protocol Shape: View, Sendable, _RemoveGlobalActorIsolation where Content
 
 extension Shape {
     public var body: EmptyView { return EmptyView() }
+
+    /// The animatable data of the shape, empty by default as in SwiftUI.
+    public var animatableData: EmptyAnimatableData {
+        get { EmptyAnimatableData() }
+        set {}
+    }
+
+    /// Forwards `CGRect`-based path requests to the ``Path/Rect`` overload.
+    public func path(in bounds: CGRect) -> Path {
+        path(in: Path.Rect(bounds))
+    }
+
+    /// Forwards ``Path/Rect``-based path requests to the `CGRect` overload.
+    public func path(in bounds: Path.Rect) -> Path {
+        path(in: CGRect(bounds))
+    }
 
     public func size(fitting proposal: ProposedViewSize) -> ViewSize {
         proposal.replacingUnspecifiedDimensions(by: ViewSize(10, 10))
@@ -110,7 +137,13 @@ extension Shape {
         let pointsChanged = storage.oldPath?.actions != path.actions
         storage.oldPath = path
 
-        let backendPath = storage.backendPath as! NewBackend.Path
+        guard let backendPath = storage.backendPath as? NewBackend.Path else {
+            // The shape was flattened into a parent container (e.g. via a
+            // pass-through modifier view) so `asWidget` never ran; skip
+            // rendering rather than crashing on the missing backend path.
+            backend.setSize(of: widget, to: layout.size.vector)
+            return
+        }
         backend.updatePath(
             backendPath,
             path,

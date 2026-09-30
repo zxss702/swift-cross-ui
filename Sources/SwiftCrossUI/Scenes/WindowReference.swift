@@ -7,6 +7,18 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
     private var scene: SceneType
     /// The view graph of the window's root view.
     private let viewGraph: ViewGraph<SceneType.Content>
+    /// The chrome model shared between content views and the chrome bar.
+    /// Non-`nil` only on backends with integrated window chrome.
+    private var windowChromeModel: WindowChromeModel?
+    /// The view graph rendering the window's title-bar chrome strip into the
+    /// container installed by the backend (``BackendFeatures/WindowChrome``).
+    private var chromeGraph: ViewGraph<WindowChromeBar>?
+    /// Whether a deferred chrome refresh has already been dispatched (they
+    /// coalesce — one refresh per main-loop tick at most).
+    private var chromeUpdateScheduled = false
+    /// The environment used by the most recent chrome layout, replayed by
+    /// deferred refreshes triggered via ``WindowChromeModel/onDidChange``.
+    private var chromeEnvironment: EnvironmentValues?
     /// The window being rendered in.
     let window: Any
     /// `false` after the first scene update.
@@ -40,10 +52,57 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
             id: id
         )
 
+        var rootEnvironment = environment.with(\.window, window)
+
+        // On backends with integrated window chrome, install the title-bar
+        // chrome container and give it a second view graph so that the chrome
+        // strip (app menu, back button, title, toolbar) can be rendered by
+        // regular views.
+        if let backend = backend as? any (
+            BaseAppBackend
+                & BackendFeatures.WindowChrome<Backend.Window, Backend.Widget>
+        ) {
+            func install<NewBackend>(
+                backend: NewBackend,
+                baseTitle: Text,
+                environment: EnvironmentValues
+            ) -> (WindowChromeModel, ViewGraph<WindowChromeBar>)?
+            where NewBackend: BaseAppBackend,
+                NewBackend: BackendFeatures.WindowChrome<Backend.Window, Backend.Widget>
+            {
+                guard
+                    let container = backend.installWindowChrome(
+                        in: window as! NewBackend.Window
+                    )
+                else { return nil }
+                let model = WindowChromeModel(baseTitle: baseTitle)
+                let graph = ViewGraph(
+                    for: WindowChromeBar(),
+                    backend: backend,
+                    environment: environment.with(\.windowChrome, model)
+                )
+                backend.insert(
+                    graph.rootNode.concreteNode(for: NewBackend.self).widget,
+                    into: container,
+                    at: 0
+                )
+                return (model, graph)
+            }
+            if let installed = install(
+                backend: backend,
+                baseTitle: Text(scene.title),
+                environment: rootEnvironment
+            ) {
+                self.windowChromeModel = installed.0
+                self.chromeGraph = installed.1
+                rootEnvironment = rootEnvironment.with(\.windowChrome, installed.0)
+            }
+        }
+
         viewGraph = ViewGraph(
             for: scene.content(),
             backend: backend,
-            environment: environment.with(\.window, window)
+            environment: rootEnvironment
         )
         let rootWidget = viewGraph.rootNode.concreteNode(for: Backend.self).widget
 
@@ -166,6 +225,18 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
                 window: window,
                 rootEnvironment: environment.with(\.window, window)
             )
+            // Match SwiftUI's behaviour where `dismiss()` called from a
+            // window's root content (i.e. outside of any sheet or popover)
+            // dismisses the window itself.
+            .with(
+                \.dismiss,
+                DismissAction(action: {
+                    DismissWindowAction(
+                        backend: backend,
+                        window: MainActorBox(value: window as Any?)
+                    )()
+                })
+            )
             .with(\.onResize) { [weak self] _ in
                 guard let self else { return }
                 self.cachedWindowSize = nil
@@ -180,6 +251,9 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
                     environment: environment
                 )
             }
+        if let windowChromeModel {
+            environment = environment.with(\.windowChrome, windowChromeModel)
+        }
         let outerColorScheme = environment.colorScheme
 
         // Update environment with latest cached value before first update to
@@ -296,12 +370,42 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
             setBehaviors(backend: backend)
         }
 
+        environment = environment.with(
+            \.windowBackgroundColor,
+            finalContentResult.preferences.windowBackground
+        )
+
         // Generally just used to update the window color scheme
         backend.updateWindow(window, environment: environment)
 
         // Delay committing the view graph so that the View.inspectWindow(_:)
         // modifiers can be used to overwrite certain SwiftCrossUI behaviors
         viewGraph.commit()
+
+        // Update the title-bar chrome strip after the content commits so that
+        // contributions published during this update are picked up in the
+        // same frame.
+        if let chromeGraph {
+            windowChromeModel?.baseTitle = Text(scene.title)
+            // Contributions also arrive via bottom-up node commits (state
+            // changes), which never pass through this update — let the model
+            // schedule a deferred chrome refresh for those.
+            chromeEnvironment = environment
+            windowChromeModel?.onDidChange = { [weak self] in
+                self?.scheduleDeferredChromeRefresh(backend: backend)
+            }
+            _ = chromeGraph.computeLayout(
+                with: WindowChromeBar(),
+                proposedSize: ProposedViewSize(
+                    SIMD2(
+                        proposedWindowSize.x,
+                        Int(environment.windowChromeStripHeight.rounded(.awayFromZero))
+                    )
+                ),
+                environment: environment
+            )
+            chromeGraph.commit()
+        }
 
         if isFirstUpdate {
             backend.show(window: window)
@@ -311,6 +415,33 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
 
     func viewModelDidChange<Backend: BaseAppBackend>(backend: Backend) {
         self.update(self.scene, backend: backend, environment: self.parentEnvironment)
+    }
+
+    /// Schedules a chrome-strip relayout on the next main-loop tick. Used when
+    /// ``WindowChromeModel`` contributions arrive outside of a full window
+    /// update (e.g. a navigation push committed via a bottom-up node update).
+    private func scheduleDeferredChromeRefresh<Backend: BaseAppBackend>(backend: Backend) {
+        guard !chromeUpdateScheduled else { return }
+        chromeUpdateScheduled = true
+        backend.runInMainThread { [weak self] in
+            guard let self else { return }
+            self.chromeUpdateScheduled = false
+            guard
+                let chromeGraph = self.chromeGraph,
+                let environment = self.chromeEnvironment
+            else { return }
+            _ = chromeGraph.computeLayout(
+                with: WindowChromeBar(),
+                proposedSize: ProposedViewSize(
+                    SIMD2(
+                        self.cachedWindowSize?.x ?? 0,
+                        Int(environment.windowChromeStripHeight.rounded(.awayFromZero))
+                    )
+                ),
+                environment: environment
+            )
+            chromeGraph.commit()
+        }
     }
 
     func activate<Backend: BaseAppBackend>(backend: Backend) {

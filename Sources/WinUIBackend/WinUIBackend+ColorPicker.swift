@@ -86,7 +86,7 @@ final class ColorButton: WinUI.Button {
     }
 
     func setColor(to color: UWP.Color) {
-        let canvas = content as! Canvas
+        let canvas = content as! WinUI.Canvas
         let brush = WinUI.SolidColorBrush()
         brush.color = color
         canvas.background = brush

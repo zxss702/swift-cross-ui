@@ -133,7 +133,7 @@ public final class WinUIBackend:
 
     public let defaultTableRowContentHeight = 20
     public let defaultTableCellVerticalPadding = 4
-    public let defaultPaddingAmount = 10
+    public let defaultPaddingAmount: Double = 10
     public let requiresImageUpdateOnScaleFactorChange = false
     public let supportsMultipleWindows = true
     public let deviceClass = DeviceClass.desktop
@@ -158,8 +158,25 @@ public final class WinUIBackend:
         var toggleClickActions: [ObjectIdentifier: (Bool) -> Void] = [:]
         var switchClickActions: [ObjectIdentifier: (Bool) -> Void] = [:]
         var sliderChangeActions: [ObjectIdentifier: (Double) -> Void] = [:]
+        var webViewNavigationStartingHandlers: [ObjectIdentifier: EventCleanup] = [:]
+        var applicationMenu: ([ResolvedMenu.Submenu], EnvironmentValues)?
         var textFieldChangeActions: [ObjectIdentifier: (String) -> Void] = [:]
         var textFieldSubmitActions: [ObjectIdentifier: () -> Void] = [:]
+
+        /// Memoized results of `size(of:whenDisplayedIn:...)` text
+        /// measurements. Text measurement requires a real XAML `measure` call,
+        /// which is expensive when every layout pass re-measures every
+        /// `TextBlock` — the same (text, font, proposal) triples recur
+        /// constantly.
+        var textMeasurementCache: [TextMeasurementKey: SIMD2<Int>] = [:]
+    }
+
+    struct TextMeasurementKey: Hashable {
+        var text: String
+        var font: Font.Resolved
+        var proposedWidth: Int?
+        var proposedHeight: Int?
+        var lineLimit: LineLimit?
     }
     private var rootEnvironmentChangeHandler: (@Sendable @MainActor () -> Void)?
 
@@ -225,6 +242,11 @@ public final class WinUIBackend:
 
         WinUIApplication.callback.withLock { launchCallback in
             launchCallback = { application, instance in
+                // Keep the dispatcher running after the last window closes so
+                // that transient gaps between `dismiss()` and `openWindow(...)`
+                // (or just having no windows open) don't quit the app.
+                application.dispatcherShutdownMode = .onExplicitShutdown
+
                 // Toggle Switch has annoying default 'internal margins' (not Control
                 // margins that we can set directly) that we can luckily get rid of by
                 // overriding the relevant resource values.
@@ -267,6 +289,7 @@ public final class WinUIBackend:
         let window = CustomWindow()
         windows.append(window)
         window.closed.addHandler { _, _ in
+            window.isClosed = true
             self.windows.removeAll { other in
                 window === other
             }
@@ -305,18 +328,25 @@ public final class WinUIBackend:
         if let size {
             setSize(ofWindow: window, to: size)
         }
+        window.applyPendingClientSize = { [weak self, weak window] in
+            guard let self, let window, !window.isClosed else { return }
+            self.applyPendingClientSize(of: window)
+        }
+        applyApplicationMenu(to: window)
         return window
     }
 
     public func updateWindow(_ window: Window, environment: EnvironmentValues) {
-        window.menuBar.requestedTheme = switch environment.colorScheme {
-            case .light: .light
-            case .dark: .dark
-        }
+        window.updateChromeStripHeight()
 
-        let backgroundColor: SwiftCrossUI.Color = switch environment.colorScheme {
-            case .light: .white
-            case .dark: .black
+        let backgroundColor: SwiftCrossUI.Color
+        if let custom = environment.windowBackgroundColor {
+            backgroundColor = custom
+        } else {
+            backgroundColor = switch environment.colorScheme {
+                case .light: .white
+                case .dark: .black
+            }
         }
         let brush = WinUI.SolidColorBrush()
         brush.color = backgroundColor.resolve(in: environment).uwpColor
@@ -341,6 +371,12 @@ public final class WinUIBackend:
     }
 
     public func setSize(ofWindow window: Window, to newSize: SIMD2<Int>) {
+        // AppWindow ignores resizes requested before the window has been
+        // shown for the first time, so we defer them until activation.
+        if !window.hasBeenShown {
+            window.pendingClientSize = newSize
+            return
+        }
         let scaleFactor = window.scaleFactor
         let width = scaleFactor * Double(newSize.x)
         let height = scaleFactor * Double(newSize.y + window.contentHeightAdjustment)
@@ -348,7 +384,11 @@ public final class WinUIBackend:
             width: Int32(width.rounded(.towardZero)),
             height: Int32(height.rounded(.towardZero))
         )
-        try! window.appWindow.resizeClient(size)
+        window.desiredClientSize = newSize
+        // `resizeClient` occasionally gets dropped by AppWindow during window
+        // activation, and can throw for stale windows. Failures are recovered
+        // by the verification pass in `show`.
+        try? window.appWindow.resizeClient(size)
     }
 
     public func setSizeLimits(
@@ -364,9 +404,13 @@ public final class WinUIBackend:
         to action: @escaping (SIMD2<Int>) -> Void
     ) {
         window.sizeChanged.addHandler { _, args in
+            // `WindowSizeChangedEventArgs.size` is already in DIPs (unlike
+            // `AppWindow.clientSize` which is in physical pixels), so it must
+            // not be divided by the scale factor again.
             let size = SIMD2(
-                Int(args!.size.width.rounded(.awayFromZero)),
-                Int(args!.size.height.rounded(.awayFromZero)) - window.contentHeightAdjustment
+                Int(Double(args!.size.width).rounded(.awayFromZero)),
+                Int(Double(args!.size.height).rounded(.awayFromZero))
+                    - window.contentHeightAdjustment
             )
             action(size)
         }
@@ -405,8 +449,67 @@ public final class WinUIBackend:
         }
     }
 
+    /// The most recently shown window, used to parent system dialogs such as
+    /// file pickers when no explicit anchor window is provided.
+    internal static var lastShownWindow: Window?
+
     public func show(window: Window) {
+        // `activate` fires the `activated` event synchronously, so the window
+        // must be marked as shown first for the pending-size application in
+        // that handler to go through.
+        window.hasBeenShown = true
         activate(window: window)
+        WinUIBackend.lastShownWindow = window
+        // `resizeClient` is silently ignored until the window has been shown,
+        // so resizes requested pre-activation are deferred to this point.
+        applyPendingClientSize(of: window)
+        // `resizeClient` can still be dropped by AppWindow in the moments
+        // right after activation, so verify that the resize took effect and
+        // retry a few times if it didn't.
+        verifyClientSize(of: window, attemptsRemaining: 6)
+    }
+
+    private func verifyClientSize(
+        of window: CustomWindow,
+        attemptsRemaining: Int,
+        stagnantChecks: Int = 0
+    ) {
+        guard attemptsRemaining > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(300)) {
+            [weak self, weak window] in
+            guard let self, let window, !window.isClosed,
+                let desired = window.desiredClientSize
+            else { return }
+            let current = self.size(ofWindow: window)
+            guard abs(current.x - desired.x) > 1 || abs(current.y - desired.y) > 1
+            else { return }
+            // `resizeClient` applies asynchronously, so a check can read the
+            // pre-resize size. Only conclude that AppWindow is clamping the
+            // request (e.g. to the work area) after several consecutive
+            // unchanged readings — otherwise we'd accept a wrong size and
+            // give up while the real resize was still in flight.
+            let stagnant = current == window.lastVerifiedClientSize
+                ? stagnantChecks + 1
+                : 0
+            if stagnant >= 3 {
+                window.desiredClientSize = current
+                return
+            }
+            window.lastVerifiedClientSize = current
+            self.setSize(ofWindow: window, to: desired)
+            self.verifyClientSize(
+                of: window,
+                attemptsRemaining: attemptsRemaining - 1,
+                stagnantChecks: stagnant
+            )
+        }
+    }
+
+    func applyPendingClientSize(of window: CustomWindow) {
+        guard let pendingSize = window.pendingClientSize else { return }
+        window.desiredClientSize = pendingSize
+        setSize(ofWindow: window, to: pendingSize)
+        window.pendingClientSize = nil
     }
 
     public func activate(window: Window) {
@@ -474,9 +577,11 @@ public final class WinUIBackend:
                 let widget = ToggleMenuFlyoutItem()
                 widget.text = label
                 widget.isChecked = value
-                widget.click.addHandler { [weak widget] _, _ in
-                    guard let widget else { return }
-                    onChange(widget.isChecked)
+                widget.click.addHandler { [weak widget] sender, _ in
+                    let checked =
+                        (sender as? ToggleMenuFlyoutItem)?.isChecked ?? widget?.isChecked
+                    guard let checked else { return }
+                    onChange(checked)
                 }
                 widget.isEnabled = environment.isEnabled
                 return widget
@@ -500,25 +605,71 @@ public final class WinUIBackend:
         _ submenus: [ResolvedMenu.Submenu],
         environment: EnvironmentValues
     ) {
-        let items = submenus.map { submenu in
-            let item = MenuBarItem()
-            item.title = submenu.label
+        // Stash the menu so that windows created later (e.g. via
+        // `openWindow(id:)`) can populate their menu bars too.
+        internalState.applicationMenu = (submenus, environment)
+
+        // Each window gets its own menu items: a XAML element can only be the
+        // child of a single parent.
+        for window in windows {
+            applyApplicationMenu(to: window)
+        }
+    }
+
+    private func menuItemSignature(_ item: ResolvedMenu.Item) -> String {
+        switch item {
+            case .button(let label, _):
+                return "b:\(label)"
+            case .toggle(let label, let value, _):
+                return "t:\(label):\(value)"
+            case .separator:
+                return "s"
+            case .submenu(let submenu):
+                let inner = submenu.content.items.map(menuItemSignature).joined(separator: ",")
+                return "m:\(submenu.label)(\(inner))"
+            case .modifiedEnvironment(let item, _):
+                return "e(\(menuItemSignature(item)))"
+        }
+    }
+
+    private func menuSignature(
+        _ submenus: [ResolvedMenu.Submenu],
+        environment: EnvironmentValues
+    ) -> String {
+        let inner = submenus.map { submenu in
+            "\(submenu.label)(\(submenu.content.items.map(menuItemSignature).joined(separator: ",")))"
+        }.joined(separator: "|")
+        return "\(inner)#enabled:\(environment.isEnabled)"
+    }
+
+    func applyApplicationMenu(to window: CustomWindow) {
+        guard let menu = internalState.applicationMenu,
+            let appMenuButton = window.appMenuButton
+        else { return }
+        let (submenus, environment) = menu
+        let signature = menuSignature(submenus, environment: environment)
+
+        // Rebuilding the menu destroys the active flyout items: if a refresh
+        // is triggered while a flyout is open (e.g. by another window's
+        // activation), the clicked item may be released before its click
+        // event is delivered. Skip the rebuild when nothing has changed —
+        // unless the button has no flyout yet (a freshly attached button).
+        guard signature != window.appliedMenuSignature || appMenuButton.flyout == nil
+        else { return }
+        window.appliedMenuSignature = signature
+
+        let flyout = MenuFlyout()
+        for (index, submenu) in submenus.enumerated() {
+            if index > 0 {
+                flyout.items.append(MenuFlyoutSeparator())
+            }
             for subitem in submenu.content.items {
-                item.items.append(
+                flyout.items.append(
                     renderMenuItem(subitem, environment: environment)
                 )
             }
-            return item
         }
-
-        for window in windows {
-            window.menuBar.items.clear()
-            for item in items {
-                window.menuBar.items.append(item)
-            }
-            window.setMenuBarVisible(!items.isEmpty)
-            window.menuBar.requestedTheme = .dark
-        }
+        appMenuButton.flyout = flyout
     }
 
     public func computeRootEnvironment(
@@ -554,8 +705,19 @@ public final class WinUIBackend:
     ) -> EnvironmentValues {
         // TODO: Compute window scale factor (easy enough, but we would also have to keep
         //   it up-to-date then, which is kinda annoying for now)
-        rootEnvironment
+        let titleBar = window.cachedAppWindow?.titleBar
+        let scale = window.scaleFactor
+        return rootEnvironment
             .with(\.scenePhase, window.isActive ? .active : .inactive)
+            .with(\.windowChromeStripHeight, Double(titleBar?.height ?? 32) / scale)
+            .with(
+                \.windowCaptionLeadingInset,
+                Double(titleBar?.leftInset ?? 0) / scale
+            )
+            .with(
+                \.windowCaptionTrailingInset,
+                Double(titleBar?.rightInset ?? 0) / scale
+            )
     }
 
     public func setWindowEnvironmentChangeHandler(
@@ -567,9 +729,19 @@ public final class WinUIBackend:
         // NB: This event fires when the window is activated _or_ deactivated.
         window.activated.addHandler { _, _ in
             if let rootHandler = self.rootEnvironmentChangeHandler {
-                rootHandler()
-                // Don't bother calling `action` since this window's environment
-                // will be recomputed anyway.
+                // Defer the refresh to the next dispatcher turn: `activated`
+                // fires synchronously inside `activate()` (i.e. mid-window-
+                // setup) and while menu flyouts are open. Rebuilding the
+                // scene graph here reenters the activating window's own
+                // `update` and tears down in-flight UI such as the clicked
+                // menu item.
+                _ = try? self.dispatcherQueue?.tryEnqueue(.normal) {
+                    MainActor.assumeIsolated {
+                        rootHandler()
+                        // Don't bother calling `action` since this window's
+                        // environment will be recomputed anyway.
+                    }
+                }
             } else {
                 action()
             }
@@ -606,23 +778,23 @@ public final class WinUIBackend:
     }
 
     public func createContainer() -> Widget {
-        Canvas()
+        WinUI.Canvas()
     }
 
     public func removeAllChildren(of container: Widget) {
-        let container = container as! Canvas
+        let container = container as! WinUI.Canvas
         container.children.clear()
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
-        let container = container as! Canvas
+        let container = container as! WinUI.Canvas
         container.children.insertAt(UInt32(index), child)
     }
 
     public func swap(childAt firstIndex: Int, withChildAt secondIndex: Int, in container: Widget) {
         // TODO: Find out if there's an efficient way to do this without WinUI
         //   getting annoyed at us for having the same element in the list twice.
-        let container = container as! Canvas
+        let container = container as! WinUI.Canvas
         let largerIndex = UInt32(max(firstIndex, secondIndex))
         let smallerIndex = UInt32(min(firstIndex, secondIndex))
         let element1 = container.children[Int(smallerIndex)]
@@ -634,30 +806,38 @@ public final class WinUIBackend:
     }
 
     public func remove(childAt index: Int, from container: Widget) {
-        let container = container as! Canvas
+        let container = container as! WinUI.Canvas
         container.children.removeAt(UInt32(index))
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
-        let container = container as! Canvas
+        let container = container as! WinUI.Canvas
         guard let child = container.children.getAt(UInt32(index)) else {
             logger.warning("child to set position of not found")
             return
         }
 
-        Canvas.setTop(child, Double(position.y))
-        Canvas.setLeft(child, Double(position.x))
+        // Attached property writes invalidate layout even when unchanged, so
+        // skip redundant writes (see `setSize`).
+        let left = Double(position.x)
+        let top = Double(position.y)
+        if WinUI.Canvas.getLeft(child) != left {
+            WinUI.Canvas.setLeft(child, left)
+        }
+        if WinUI.Canvas.getTop(child) != top {
+            WinUI.Canvas.setTop(child, top)
+        }
     }
 
     public func createColorableRectangle() -> Widget {
-        Canvas()
+        WinUI.Canvas()
     }
 
     public func setColor(
         ofColorableRectangle widget: Widget,
         to color: SwiftCrossUI.Color.Resolved
     ) {
-        let canvas = widget as! Canvas
+        let canvas = widget as! WinUI.Canvas
         let brush = WinUI.SolidColorBrush()
         brush.color = color.uwpColor
         canvas.background = brush
@@ -668,9 +848,15 @@ public final class WinUIBackend:
     }
 
     public func setCornerRadius(of widget: Widget, to radius: Int) {
-        let visual: WinAppSDK.Visual = try! widget.getVisualInternal()
+        guard
+            let visual: WinAppSDK.Visual = try? widget.getVisualInternal(),
+            let geometry = try? visual.compositor.createRoundedRectangleGeometry(),
+            let clip = try? visual.compositor.createGeometricClip()
+        else {
+            logger.warning("failed to set corner radius: widget visual unavailable")
+            return
+        }
 
-        let geometry = try! visual.compositor.createRoundedRectangleGeometry()!
         geometry.cornerRadius = WindowsFoundation.Vector2(
             x: Float(radius),
             y: Float(radius)
@@ -683,10 +869,19 @@ public final class WinUIBackend:
             y: Float(widget.height)
         )
 
-        let clip = try! visual.compositor.createGeometricClip()!
         clip.geometry = geometry
 
         visual.clip = clip
+
+        // Keep the clip in sync when the widget is resized afterwards,
+        // since the geometry size is only a snapshot of the current size.
+        widget.sizeChanged.addHandler { _, args in
+            guard let args else { return }
+            geometry.size = WindowsFoundation.Vector2(
+                x: Float(args.newSize.width),
+                y: Float(args.newSize.height)
+            )
+        }
     }
 
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
@@ -731,7 +926,10 @@ public final class WinUIBackend:
             return SIMD2(20, 20)
         } else if let picker = widget as? CustomComboBox, picker.padding == noPadding {
             let label = TextBlock()
-            label.text = picker.options[Int(max(picker.selectedIndex, 0))]
+            let selectedIndex = max(Int(picker.selectedIndex), 0)
+            label.text = picker.options.indices.contains(selectedIndex)
+                ? picker.options[selectedIndex]
+                : (picker.options.first ?? "")
             label.fontSize = picker.fontSize
             label.fontWeight = picker.fontWeight
             try! label.measure(allocation)
@@ -784,8 +982,8 @@ public final class WinUIBackend:
         let adjustment = sizeCorrection(for: widget)
 
         let out = SIMD2(
-            Int(computedSize.width) + adjustment.x,
-            Int(computedSize.height) + adjustment.y
+            Int(computedSize.width.rounded(.up)) + adjustment.x,
+            Int(computedSize.height.rounded(.up)) + adjustment.y
         )
 
         return out
@@ -858,8 +1056,17 @@ public final class WinUIBackend:
     }
 
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
-        widget.width = Double(size.x)
-        widget.height = Double(size.y)
+        // Writing width/height on a FrameworkElement invalidates XAML layout
+        // even when the value is unchanged, so avoid redundant writes — this
+        // gets called for every leaf widget on every view graph commit.
+        let width = Double(max(size.x, 0))
+        let height = Double(max(size.y, 0))
+        if widget.width != width {
+            widget.width = width
+        }
+        if widget.height != height {
+            widget.height = height
+        }
     }
 
     public func createTooltipContainer(wrapping child: Widget) -> Widget {
@@ -879,6 +1086,17 @@ public final class WinUIBackend:
         proposedHeight: Int?,
         environment: EnvironmentValues
     ) -> SIMD2<Int> {
+        let cacheKey = TextMeasurementKey(
+            text: text,
+            font: environment.resolvedFont,
+            proposedWidth: proposedWidth,
+            proposedHeight: proposedHeight,
+            lineLimit: environment.lineLimitSettings
+        )
+        if let cached = internalState.textMeasurementCache[cacheKey] {
+            return cached
+        }
+
         // Update the text view's environment and measure its desired line height
         updateTextView(measurementTextBlock, content: text, environment: environment)
 
@@ -888,6 +1106,14 @@ public final class WinUIBackend:
             proposedWidth: proposedWidth,
             proposedHeight: proposedHeight
         )
+
+        // TextBlocks measured outside the visual tree can slightly
+        // underreport their width once hosted (especially for text requiring
+        // font fallback such as CJK). Pad the measured width by a DIP so that
+        // rendered text doesn't get ellipsised at exactly its measured width.
+        if !text.isEmpty, proposedWidth == nil || size.x < proposedWidth! {
+            size.x += 1
+        }
 
         var usedHeight = size.y
         let lineHeight = environment.resolvedFont.lineHeight
@@ -905,6 +1131,7 @@ public final class WinUIBackend:
         // Make sure the text doesn't get shorter than a single line of text even if
         // it's empty.
         size.y = max(usedHeight, Int(lineHeight))
+        internalState.textMeasurementCache[cacheKey] = size
         return size
     }
 
@@ -921,8 +1148,8 @@ public final class WinUIBackend:
 
         let computedSize = textBlock.desiredSize
         return SIMD2(
-            Int(computedSize.width),
-            Int(computedSize.height)
+            Int(computedSize.width.rounded(.up)),
+            Int(computedSize.height.rounded(.up))
         )
     }
 
@@ -940,8 +1167,16 @@ public final class WinUIBackend:
         environment: EnvironmentValues
     ) {
         let block = textView as! TextBlock
-        block.text = content
-        block.isTextSelectionEnabled = environment.isTextSelectionEnabled
+        // This gets called for every Text view on every layout pass (not just
+        // commits), so skip property writes whose values are unchanged —
+        // writes invalidate XAML layout/measure even when assigned the
+        // existing value.
+        if block.text != content {
+            block.text = content
+        }
+        if block.isTextSelectionEnabled != environment.isTextSelectionEnabled {
+            block.isTextSelectionEnabled = environment.isTextSelectionEnabled
+        }
         // TODO: Font design handling (monospace vs normal)
         environment.apply(to: block)
     }
@@ -1006,6 +1241,16 @@ public final class WinUIBackend:
         button.flyout = menu
     }
 
+    public func setButtonMenu(
+        _ button: Widget,
+        menu: Menu,
+        environment: EnvironmentValues
+    ) {
+        let button = button as! WinUI.Button
+        environment.apply(to: button)
+        button.flyout = menu
+    }
+
     public func createScrollContainer(for child: Widget) -> Widget {
         let scrollViewer = WinUI.ScrollViewer()
         scrollViewer.content = child
@@ -1022,7 +1267,12 @@ public final class WinUIBackend:
         hasHorizontalScrollBar: Bool,
         hasVerticalScrollBar: Bool
     ) {
-        let scrollViewer = scrollView as! WinUI.ScrollViewer
+        guard let scrollViewer = scrollView as? WinUI.ScrollViewer else {
+            logger.warning(
+                "updateScrollContainer called on non-ScrollViewer widget \(type(of: scrollView))"
+            )
+            return
+        }
 
         scrollViewer.isHorizontalRailEnabled = hasHorizontalScrollBar
         scrollViewer.horizontalScrollMode = hasHorizontalScrollBar ? .enabled : .disabled
@@ -1067,8 +1317,8 @@ public final class WinUIBackend:
     public func baseItemPadding(ofSelectableListView listView: Widget) -> EdgeInsets {
         EdgeInsets(
             top: 8,
-            bottom: 8,
             leading: 16,
+            bottom: 8,
             trailing: 12
         )
     }
@@ -1328,7 +1578,8 @@ public final class WinUIBackend:
         // Remove padding
         textEditor.padding = Thickness(left: 0, top: 0, right: 0, bottom: 0)
 
-        // Remove background color
+        // Remove border and background color
+        textEditor.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
         let brush = SolidColorBrush()
         brush.color = UWP.Color(a: 0, r: 0, g: 0, b: 0)
         textEditor.background = brush
@@ -1337,6 +1588,7 @@ public final class WinUIBackend:
         _ = textEditor.resources.insert("TextControlBackgroundPointerOver", brush)
         _ = textEditor.resources.insert("TextControlBackgroundFocused", brush)
         _ = textEditor.resources.insert("TextControlBorderBrushFocused", brush)
+        _ = textEditor.resources.insert("TextControlBorderBrushPointerOver", brush)
 
         return textEditor
     }
@@ -1403,8 +1655,16 @@ public final class WinUIBackend:
         }
     }
 
+    public func tag(widget: Widget, as tag: String) {
+        WinUI.AutomationProperties.setName(widget, tag)
+    }
+
     public func createImageView() -> Widget {
-        WinUI.Image()
+        let imageView = WinUI.Image()
+        // Match AppKit's `.scaleAxesIndependently`: the layout system sizes
+        // the element's frame and the bitmap stretches to fill it.
+        imageView.stretch = .fill
+        return imageView
     }
 
     public func updateImageView(
@@ -1417,31 +1677,45 @@ public final class WinUIBackend:
         dataHasChanged: Bool,
         environment: EnvironmentValues
     ) {
+        // The bitmap's pixels only depend on rgbaData — the Image element
+        // stretches to fit its layout slot via `stretch = .fill`, so a pure
+        // resize (targetWidth/Height change) doesn't require re-uploading the
+        // pixel data. Rebuilding a WriteableBitmap costs a full buffer copy
+        // plus a per-pixel RGBA→BGRA swizzle on the UI thread, so skip it
+        // whenever the pixel data is unchanged (matches the other backends).
+        guard dataHasChanged else { return }
+
         let imageView = imageView as! WinUI.Image
+        imageView.source = Self.writeableBitmap(
+            rgbaData: rgbaData,
+            width: width,
+            height: height
+        )
+    }
+
+    /// Builds a `WriteableBitmap` from straight RGBA pixels, converting to the
+    /// premultiplied BGRA the pixel format expects — storing straight RGBA
+    /// makes every partially-transparent pixel look washed out.
+    static func writeableBitmap(
+        rgbaData: [UInt8],
+        width: Int,
+        height: Int
+    ) -> WriteableBitmap {
         let bitmap = WriteableBitmap(Int32(width), Int32(height))
         let buffer = try! bitmap.pixelBuffer.buffer!
         memcpy(buffer, rgbaData, min(Int(bitmap.pixelBuffer.length), rgbaData.count))
-
-        // Convert RGBA to BGRA in-place, and apply janky transparency fix until we
-        // figure out how to fix WinUI image blending (non-black transparent pixels
-        // just don't seem to get blended at all, or at least pixels that are white
-        // enough, haven't tested many colours).
         for i in 0..<(width * height) {
             let offset = i * 4
-            if buffer[offset + 3] == 0 {
-                // If transparent, make the pixel black (this is the janky blending fix).
-                buffer[offset] = 0
-                buffer[offset + 1] = 0
-                buffer[offset + 2] = 0
-            } else {
-                // Swap R and B (RGBA to BGRA)
-                let tmp = buffer[offset]
-                buffer[offset] = buffer[offset + 2]
-                buffer[offset + 2] = tmp
-            }
+            let r = UInt32(buffer[offset])
+            let g = UInt32(buffer[offset + 1])
+            let b = UInt32(buffer[offset + 2])
+            let a = UInt32(buffer[offset + 3])
+            // (+127) keeps `x * a / 255` close to the true value.
+            buffer[offset] = UInt8((b * a + 127) / 255)
+            buffer[offset + 1] = UInt8((g * a + 127) / 255)
+            buffer[offset + 2] = UInt8((r * a + 127) / 255)
         }
-
-        imageView.source = bitmap
+        return bitmap
     }
 
     public func createSplitView(leadingChild: Widget, trailingChild: Widget) -> Widget {
@@ -1450,6 +1724,8 @@ public final class WinUIBackend:
         splitView.content = trailingChild
         splitView.isPaneOpen = true
         splitView.displayMode = .inline
+        // Match the AppKit backend's defaultLeadingWidth of 200.
+        splitView.openPaneLength = 200
         return splitView
     }
 
@@ -1476,11 +1752,45 @@ public final class WinUIBackend:
         maximum maximumWidth: Int
     ) {
         let splitView = splitView as! CustomSplitView
-        let newWidth = Double(max(minimumWidth, 10))
+        // A closed pane has no width to clamp — and clamping `openPaneLength`
+        // back to a nonzero minimum would fight `setSidebarWidth(0)` in an
+        // update loop (each mutation fires `sidebarResizeHandler` which
+        // schedules another commit). Reopening goes through `setSidebarWidth`,
+        // which sets the width directly.
+        guard splitView.isPaneOpen else { return }
+        // WinUI's SplitView has no separate resize bounds — `openPaneLength`
+        // is both the current width and the only control. Match the other
+        // backends' semantics where setting bounds only constrains the pane
+        // rather than resizing it, by clamping the current width into range.
+        let newWidth = min(
+            max(splitView.openPaneLength, Double(max(minimumWidth, 0))),
+            Double(max(maximumWidth, minimumWidth))
+        )
         if newWidth != splitView.openPaneLength {
             splitView.openPaneLength = newWidth
             splitView.sidebarResizeHandler?()
         }
+    }
+
+    public func setSidebarWidth(
+        ofSplitView splitView: Widget,
+        to width: Int
+    ) {
+        let splitView = splitView as! CustomSplitView
+        let newWidth = max(0, Double(width))
+        splitView.isPaneOpen = newWidth > 0
+        if newWidth != splitView.openPaneLength {
+            splitView.openPaneLength = newWidth
+            splitView.sidebarResizeHandler?()
+        }
+    }
+
+    public func setSplitViewPaneOnTrailingEdge(
+        _ splitView: Widget,
+        to isOnTrailingEdge: Bool
+    ) {
+        guard let splitView = splitView as? CustomSplitView else { return }
+        splitView.panePlacement = isOnTrailingEdge ? .right : .left
     }
 
     public func createToggle() -> Widget {
@@ -1619,6 +1929,28 @@ public final class WinUIBackend:
 
         let window = window ?? windows[0]
         let hwnd = window.getHWND()!
+
+        if openDialogOptions.allowSelectingDirectories && !openDialogOptions.allowSelectingFiles {
+            let folderPicker = FolderPicker()
+            let folderInterface: SwiftIInitializeWithWindow =
+                try! folderPicker.thisPtr.QueryInterface()
+            try! folderInterface.initialize(with: hwnd)
+            folderPicker.fileTypeFilter.append("*")
+            let promise = try! folderPicker.pickSingleFolderAsync()!
+            promise.completed = { operation, status in
+                let result: DialogResult<[URL]> = Self.handleAsyncOperationCompletion(
+                    operation,
+                    status
+                ) { result in
+                    return .success([URL(fileURLWithPath: result.path)])
+                } onFailure: {
+                    return .cancelled
+                }
+                handleResult(result)
+            }
+            return
+        }
+
         let interface: SwiftIInitializeWithWindow = try! picker.thisPtr.QueryInterface()
         try! interface.initialize(with: hwnd)
 
@@ -1823,6 +2155,12 @@ public final class WinUIBackend:
             progressBar.value = progressBar.maximum * progressFraction
         } else {
             progressBar.isIndeterminate = true
+        }
+
+        if let tint = environment.tintColor {
+            let brush = SolidColorBrush()
+            brush.color = tint.resolve(in: environment).uwpColor
+            progressBar.foreground = brush
         }
     }
 
@@ -2210,6 +2548,9 @@ extension EnvironmentValues {
         if resolvedFont.isItalic {
             control.fontStyle = .italic
         }
+        if case .named(let family) = resolvedFont.identifier.kind {
+            control.fontFamily = WinUI.FontFamily(family)
+        }
         switch colorScheme {
             case .light:
                 control.requestedTheme = .light
@@ -2221,13 +2562,32 @@ extension EnvironmentValues {
     @MainActor
     func apply(to textBlock: WinUI.TextBlock) {
         let resolvedFont = resolvedFont
-        textBlock.fontSize = resolvedFont.pointSize
-        textBlock.fontWeight.weight = resolvedFont.winUIFontWeight
-        textBlock.foreground = winUIForegroundBrush
-        textBlock.lineHeight = resolvedFont.lineHeight
+        // Guard every write: this runs per Text view per layout pass, and
+        // XAML invalidates on writes even when the value is unchanged.
+        if textBlock.fontSize != resolvedFont.pointSize {
+            textBlock.fontSize = resolvedFont.pointSize
+        }
+        if textBlock.fontWeight.weight != resolvedFont.winUIFontWeight {
+            textBlock.fontWeight.weight = resolvedFont.winUIFontWeight
+        }
+        let foregroundColor = suggestedForegroundColor.resolve(in: self).uwpColor
+        if let brush = textBlock.foreground as? SolidColorBrush, brush.color == foregroundColor {
+        } else {
+            textBlock.foreground = winUIForegroundBrush
+        }
+        if textBlock.lineHeight != resolvedFont.lineHeight {
+            textBlock.lineHeight = resolvedFont.lineHeight
+        }
 
         if resolvedFont.isItalic {
-            textBlock.fontStyle = .italic
+            if textBlock.fontStyle != .italic {
+                textBlock.fontStyle = .italic
+            }
+        }
+        if case .named(let family) = resolvedFont.identifier.kind,
+            textBlock.fontFamily?.source != family
+        {
+            textBlock.fontFamily = WinUI.FontFamily(family)
         }
     }
 }
@@ -2315,26 +2675,77 @@ class SwiftIInitializeWithWindow: WindowsFoundation.IUnknown {
 }
 
 public class CustomWindow: WinUI.Window {
-    /// Hardcoded menu bar height from MenuBar_themeresources.xaml in the
-    /// microsoft-ui-xaml repository (the MenuBarHeight property)
-    private static let menuBarHeight = 40
+    /// The app-menu button hosted at the leading edge of the chrome strip.
+    /// Created by the window-chrome view graph and attached via
+    /// `attachAppMenuButton`; its flyout mirrors the application menu.
+    var appMenuButton: WinUI.Button?
 
-    var menuBar = WinUI.MenuBar()
+    /// The element currently registered as the window's caption drag region
+    /// via `setTitleBar` (created by the window-chrome view graph).
+    var dragElement: WinUI.FrameworkElement?
+
+    /// The container hosted in the top grid row that holds the chrome strip's
+    /// view-graph content (app menu, back button, title, toolbar items).
+    /// A `Canvas` matches the backend's generic-container model (children are
+    /// positioned absolutely by the chrome view graph).
+    var chromeContainer = WinUI.Canvas()
+
     var child: WinUIBackend.Widget?
     var grid: WinUI.Grid
     var cachedAppWindow: WinAppSDK.AppWindow!
     var isActive = false
+    /// `true` once `show` has been called for the first time. Resize requests
+    /// made before this point are deferred because `AppWindow` ignores them.
+    var hasBeenShown = false
+    var pendingClientSize: SIMD2<Int>?
+    /// The last client size we actually asked AppWindow for. Used by `show`'s
+    /// post-activation verification pass to detect dropped resizes.
+    var desiredClientSize: SIMD2<Int>?
+    /// The client size observed by the previous verification pass, used to
+    /// detect platform clamping when a requested size never materialises.
+    var lastVerifiedClientSize: SIMD2<Int>?
+    /// `true` once the window has been closed. All members that talk to the
+    /// window's underlying WinRT objects become unsafe to call at that point.
+    var isClosed = false
+    /// Called from the `activated` event handler to apply `pendingClientSize`
+    /// once the window is really up.
+    var applyPendingClientSize: (() -> Void)?
     var currentAlert: WinUIBackend.Alert?
 
-    private(set) var menuBarIsVisible = false
+    /// The signature of the menu most recently applied to this window's menu
+    /// bar. Used to skip destructive rebuilds when nothing has changed (a
+    /// rebuild releases the flyout items, including any that are mid-click).
+    var appliedMenuSignature: String?
+
+    /// The height of the system caption-button strip in DIPs. The chrome
+    /// strip matches it exactly so the caption buttons and the chrome content
+    /// share a single row.
+    var captionStripHeight: Double {
+        let height = cachedAppWindow?.titleBar.height ?? 32
+        return Double(height) / scaleFactor
+    }
 
     /// The amount of height to subtract off the window height to obtain the
     /// window's available content height.
     var contentHeightAdjustment: Int {
-        menuBarIsVisible ? Self.menuBarHeight : 0
+        Int(captionStripHeight.rounded(.awayFromZero))
     }
 
+    /// The last observed scale factor. `GetDpiForWindow` can transiently
+    /// report 96 DPI while the window is being created or moved between
+    /// monitors, so once a real (non-1.0) scale has been observed we don't
+    /// regress to 1.0 — otherwise consecutive resizes convert between DIPs
+    /// and pixels with inconsistent scales and the window size ping-pongs.
+    private var cachedScaleFactor: Double?
+
     var scaleFactor: Double {
+        func cache(_ fresh: Double) -> Double {
+            if fresh != 1 || (cachedScaleFactor ?? 1) == 1 {
+                cachedScaleFactor = fresh
+            }
+            return cachedScaleFactor!
+        }
+
         // I'm leaving this code here for future travellers. Be warned that this always
         // seems to return 100% even if the scale factor is set to 125% in settings.
         // Perhaps it's only the device's built-in default scaling? But that seems pretty
@@ -2343,22 +2754,31 @@ public class CustomWindow: WinUI.Window {
         //   var deviceScaleFactor = SCALE_125_PERCENT
         //   _ = GetScaleFactorForMonitor(monitor, &deviceScaleFactor)
 
-        let hwnd = cachedAppWindow.getHWND()!
-        let monitor = MonitorFromWindow(hwnd, DWORD(bitPattern: MONITOR_DEFAULTTONEAREST))!
+        // GetDpiForWindow returns the window's actual DPI (unlike
+        // GetDpiForMonitor which always seems to report 96 DPI on some
+        // systems even when the display is scaled).
+        if let hwnd = cachedAppWindow.getHWND() {
+            let dpi = GetDpiForWindow(hwnd)
+            if dpi != 0 {
+                return cache(Double(dpi) / Double(USER_DEFAULT_SCREEN_DPI))
+            }
 
-        var x: UINT = 0
-        var y: UINT = 0
-        let result = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &x, &y)
+            let monitor = MonitorFromWindow(hwnd, DWORD(bitPattern: MONITOR_DEFAULTTONEAREST))!
 
-        let windowScaleFactor: Double
-        if result == S_OK {
-            windowScaleFactor = Double(x) / Double(USER_DEFAULT_SCREEN_DPI)
-        } else {
-            logger.warning("failed to get window scale factor, defaulting to 1.0")
-            windowScaleFactor = 1
+            var x: UINT = 0
+            var y: UINT = 0
+            let result = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &x, &y)
+
+            if result == S_OK {
+                return cache(Double(x) / Double(USER_DEFAULT_SCREEN_DPI))
+            }
         }
 
-        return windowScaleFactor
+        if let cachedScaleFactor {
+            return cachedScaleFactor
+        }
+        logger.warning("failed to get window scale factor, defaulting to 1.0")
+        return 1
     }
 
     public override init() {
@@ -2366,12 +2786,21 @@ public class CustomWindow: WinUI.Window {
 
         super.init()
 
-        let menuBarRowDefinition = WinUI.RowDefinition()
+        let chromeRowDefinition = WinUI.RowDefinition()
         let contentRowDefinition = WinUI.RowDefinition()
-        grid.rowDefinitions.append(menuBarRowDefinition)
+        grid.rowDefinitions.append(chromeRowDefinition)
         grid.rowDefinitions.append(contentRowDefinition)
-        grid.children.append(menuBar)
-        WinUI.Grid.setRow(menuBar, 0)
+
+        // The chrome strip occupies the whole top row. It hosts the chrome
+        // view graph's content (app menu, back button, title, toolbar items
+        // and a flexible drag region) as a single row alongside the system
+        // caption buttons, as in the Windows Settings app. The drag region is
+        // a dedicated element inside the chrome content — elements registered
+        // via `setTitleBar` treat their bounds as non-client area, so keeping
+        // it out from under the interactive controls preserves their input.
+        grid.children.append(chromeContainer)
+        WinUI.Grid.setRow(chromeContainer, 0)
+        WinUI.Grid.setColumn(chromeContainer, 0)
         self.content = grid
 
         // NB: This event fires when the window is activated _or_ deactivated.
@@ -2384,31 +2813,47 @@ public class CustomWindow: WinUI.Window {
                 // Might be because it doesn't treat the underlying C enum as a Swift enum?
                 default: break
             }
+            self?.applyPendingClientSize?()
         }
 
         // Caching appWindow is apparently a good idea in terms of performance:
         // https://github.com/thebrowsercompany/swift-winrt/issues/199#issuecomment-2611006020
         cachedAppWindow = appWindow
 
-        // Default to not showing the menu bar; we only want to show it when it's non-empty
-        setMenuBarVisible(menuBarIsVisible)
-    }
+        // Extend content into the title bar so that the chrome strip doubles
+        // as the window's title bar, like other modern WinUI apps. The system
+        // still draws the native minimize/maximize/close buttons at the top
+        // right; the tall height option makes them nearly square and level
+        // with the chrome strip (the Windows Settings look).
+        extendsContentIntoTitleBar = true
+        cachedAppWindow.titleBar.iconShowOptions = .hideIconAndSystemMenu
+        cachedAppWindow.titleBar.preferredHeightOption = .tall
+        if WinAppSDK.AppWindowTitleBar.isCustomizationSupported() {
+            let transparent = UWP.Color(a: 0, r: 0, g: 0, b: 0)
+            cachedAppWindow.titleBar.buttonBackgroundColor = transparent
+            cachedAppWindow.titleBar.buttonInactiveBackgroundColor = transparent
+        }
 
-    /// Sets whether the menu bar of the current window is visible. The menu bar
-    /// is what holds the in-window app menu, it's not the title bar (the one with
-    /// the window controls).
-    public func setMenuBarVisible(_ visible: Bool) {
         grid.rowDefinitions[0]!.height = WinUI.GridLength(
-            value: visible ? Double(Self.menuBarHeight) : 0,
+            value: captionStripHeight,
             gridUnitType: .pixel
         )
-        menuBarIsVisible = visible
+    }
+
+    /// Keeps the chrome strip row exactly as tall as the system caption
+    /// buttons so they share a single visual row.
+    func updateChromeStripHeight() {
+        grid.rowDefinitions[0]!.height = WinUI.GridLength(
+            value: captionStripHeight,
+            gridUnitType: .pixel
+        )
     }
 
     public func setChild(_ child: WinUIBackend.Widget) {
         self.child = child
         grid.children.append(child)
         WinUI.Grid.setRow(child, 1)
+        WinUI.Grid.setColumn(child, 0)
     }
 }
 

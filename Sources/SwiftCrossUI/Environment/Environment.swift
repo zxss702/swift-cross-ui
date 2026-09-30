@@ -52,24 +52,37 @@ public struct Environment<Value>: DynamicProperty {
             case .keyPath(let keyPath):
                 value.value = environment[keyPath: keyPath]
             case .observableObject:
-                if let type = Value.self as? any ObservableObject.Type {
-                    value.value = (environment[observable: type] as! Value)
+                if let type = Value.self as? AnyObject.Type {
+                    value.value = environment.observableObject(forType: type) as? Value
                 }
         }
     }
 
     /// The environment value that this property refers to.
     public var wrappedValue: Value {
-        guard let value = value.value else {
-            fatalError(
-                """
-                Environment value at \(mode.pathDescription) used before initialization. Don't \
-                use @Environment properties before SwiftCrossUI requests the \
-                view's body.
-                """
-            )
+        if let value = value.value {
+            return value
         }
-        return value
+        // Bodies evaluated outside the view graph (e.g. menu content resolved
+        // via `_asMenuItems`, or `CommandGroup`/`ToolbarContent` initializers
+        // running inside `App.body`/`Scene.body`) never receive a node-scoped
+        // environment update. Fall back to the app's current root environment
+        // in that case.
+        switch mode {
+            case .keyPath(let keyPath):
+                if let current = EnvironmentValues.current {
+                    return current[keyPath: keyPath]
+                }
+            case .observableObject:
+                break
+        }
+        fatalError(
+            """
+            Environment value at \(mode.pathDescription) used before initialization. Don't \
+            use @Environment properties before SwiftCrossUI requests the \
+            view's body.
+            """
+        )
     }
 
     /// Initializes an ``Environment`` property wrapper.
@@ -80,7 +93,7 @@ public struct Environment<Value>: DynamicProperty {
         self.mode = .keyPath(keyPath)
     }
 
-    public init(_ type: Value.Type) where Value: ObservableObject {
+    public init(_ type: Value.Type) where Value: AnyObject {
         self.value = Box(nil)
         self.mode = .observableObject
     }

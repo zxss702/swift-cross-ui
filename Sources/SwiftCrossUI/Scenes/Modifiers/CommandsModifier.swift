@@ -5,6 +5,7 @@ extension Scene {
     /// if it has one, or in individual windows' menu bars otherwise.
     ///
     /// - Parameter commands: The commands to add.
+    @MainActor
     public func commands(@CommandsBuilder _ commands: () -> Commands) -> some Scene {
         CommandsModifier(content: self, commands: commands())
     }

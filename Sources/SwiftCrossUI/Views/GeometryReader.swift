@@ -1,3 +1,5 @@
+import Foundation
+
 /// A container view that allows its content to read the size proposed to it.
 ///
 /// Geometry readers always take up the size proposed to them; no more, no less.
@@ -8,8 +10,8 @@
 /// struct MeasurementView: View {
 ///     var body: some View {
 ///         GeometryReader { proxy in
-///             Text("Width: \(proxy.size.x)")
-///             Text("Height: \(proxy.size.y)")
+///             Text("Width: \(proxy.size.width)")
+///             Text("Height: \(proxy.size.height)")
 ///         }
 ///     }
 /// }
@@ -60,7 +62,9 @@ public struct GeometryReader<Content: View>: TypeSafeView, View {
         backend: Backend
     ) -> ViewLayoutResult {
         let size = proposedSize.replacingUnspecifiedDimensions(by: ViewSize(10, 10))
-        let view = content(GeometryProxy(size: size))
+        let view = content(
+            GeometryProxy(size: CGSize(width: size.width, height: size.height))
+        )
 
         let environment = environment.with(\.layoutAlignment, .leading)
 

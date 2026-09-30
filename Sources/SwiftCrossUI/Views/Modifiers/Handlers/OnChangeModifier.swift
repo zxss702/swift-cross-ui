@@ -13,6 +13,47 @@ extension View {
         OnChangeModifier(
             body: TupleView1(self),
             value: value,
+            action: { _, _ in action() },
+            initial: initial
+        )
+    }
+
+    /// A view modifier that runs an action with the new value whenever a
+    /// piece of state changes.
+    ///
+    /// - Parameters:
+    ///   - value: The value to observe for changes. Must be `Equatable`.
+    ///   - action: The action to perform, receiving the new value.
+    public func onChange<Value: Equatable>(
+        of value: Value,
+        perform action: @escaping (Value) -> Void
+    ) -> some View {
+        OnChangeModifier(
+            body: TupleView1(self),
+            value: value,
+            action: { _, newValue in action(newValue) },
+            initial: false
+        )
+    }
+
+    /// A view modifier that runs an action with the old and new values
+    /// whenever a piece of state changes.
+    ///
+    /// - Parameters:
+    ///   - value: The value to observe for changes. Must be `Equatable`.
+    ///   - initial: Whether to call `action` when the view first appears.
+    ///     When `true`, `action` is called with the same value for both
+    ///     parameters.
+    ///   - action: The action to perform, receiving the previous and new
+    ///     values.
+    public func onChange<Value: Equatable>(
+        of value: Value,
+        initial: Bool = false,
+        _ action: @escaping (Value, Value) -> Void
+    ) -> some View {
+        OnChangeModifier(
+            body: TupleView1(self),
+            value: value,
             action: action,
             initial: initial
         )
@@ -27,7 +68,7 @@ struct OnChangeModifier<Value: Equatable, Content: View>: View {
     var body: TupleView1<Content>
 
     var value: Value
-    var action: () -> Void
+    var action: (Value, Value) -> Void
     var initial: Bool
 
     // TODO: Should this go in computeLayout or commit?
@@ -39,9 +80,9 @@ struct OnChangeModifier<Value: Equatable, Content: View>: View {
         backend: Backend
     ) -> ViewLayoutResult {
         if let previousValue, value != previousValue {
-            action()
+            action(previousValue, value)
         } else if initial, previousValue == nil {
-            action()
+            action(value, value)
         }
 
         if previousValue != value {

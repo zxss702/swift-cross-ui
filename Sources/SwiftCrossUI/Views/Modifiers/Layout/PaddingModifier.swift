@@ -6,7 +6,7 @@ extension View {
     ///
     /// - Parameter amount: The amount of padding to use. If `nil`, a
     ///   backend-specific default value is used.
-    public func padding(_ amount: Int? = nil) -> some View {
+    public func padding(_ amount: Double? = nil) -> some View {
         return padding(.all, amount)
     }
 
@@ -17,7 +17,7 @@ extension View {
     ///     ``Edge/Set/all``.
     ///   - amount: The amount of padding to use. If `nil`, a backend-specific
     ///     default value is used.
-    public func padding(_ edges: Edge.Set = .all, _ amount: Int? = nil) -> some View {
+    public func padding(_ edges: Edge.Set = .all, _ amount: Double? = nil) -> some View {
         let insets = EdgeInsets.Internal(edges: edges, amount: amount)
         return PaddingModifierView(body: TupleView1(self), insets: insets)
     }
@@ -33,16 +33,16 @@ extension View {
 /// Insets for the sides of a rectangle. Generally used to represent view padding.
 public struct EdgeInsets: Equatable {
     /// The top inset.
-    public var top: Int
+    public var top: Double
     /// The bottom inset.
-    public var bottom: Int
+    public var bottom: Double
     /// The leading inset.
-    public var leading: Int
+    public var leading: Double
     /// The trailing inset.
-    public var trailing: Int
+    public var trailing: Double
 
     /// The total inset along each axis.
-    var axisTotals: SIMD2<Int> {
+    var axisTotals: SIMD2<Double> {
         SIMD2(
             leading + trailing,
             top + bottom
@@ -53,17 +53,17 @@ public struct EdgeInsets: Equatable {
     ///
     /// - Parameters:
     ///   - top: The top inset.
-    ///   - bottom: The bottom inset.
     ///   - leading: The leading inset.
+    ///   - bottom: The bottom inset.
     ///   - trailing: The trailing inset.
-    public init(top: Int = 0, bottom: Int = 0, leading: Int = 0, trailing: Int = 0) {
+    public init(top: Double = 0, leading: Double = 0, bottom: Double = 0, trailing: Double = 0) {
         self.top = top
         self.bottom = bottom
         self.leading = leading
         self.trailing = trailing
     }
 
-    init(_ insets: Internal, defaultAmount: Int) {
+    init(_ insets: Internal, defaultAmount: Double) {
         top = insets.top ?? defaultAmount
         bottom = insets.bottom ?? defaultAmount
         leading = insets.leading ?? defaultAmount
@@ -71,15 +71,15 @@ public struct EdgeInsets: Equatable {
     }
 
     struct Internal {
-        var top: Int?
-        var bottom: Int?
-        var leading: Int?
-        var trailing: Int?
+        var top: Double?
+        var bottom: Double?
+        var leading: Double?
+        var trailing: Double?
     }
 }
 
 extension EdgeInsets.Internal {
-    init(edges: Edge.Set, amount: Int?) {
+    init(edges: Edge.Set, amount: Double?) {
         self.top = edges.contains(.top) ? amount : 0
         self.bottom = edges.contains(.bottom) ? amount : 0
         self.leading = edges.contains(.leading) ? amount : 0
@@ -168,7 +168,10 @@ struct PaddingModifierView<Child: View>: TypeSafeView {
         backend.setSize(of: container, to: size.vector)
 
         let insets = EdgeInsets(insets, defaultAmount: backend.defaultPaddingAmount)
-        let childPosition = SIMD2(insets.leading, insets.top)
+        let childPosition = SIMD2(
+            LayoutSystem.roundSize(insets.leading),
+            LayoutSystem.roundSize(insets.top)
+        )
         backend.setPosition(ofChildAt: 0, in: container, to: childPosition)
     }
 }

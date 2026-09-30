@@ -63,6 +63,11 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
     /// Used by the ``ModelObserver`` protocol to prevent duplicate view updates.
     var currentViewModelObservationID: UUID?
 
+    /// The ``ViewGraphUpdateScheduler`` generation this node was last committed
+    /// in. Used to skip queued updates for nodes whose subtree was already
+    /// committed by an ancestor's update in the same flush.
+    var commitGeneration: UInt64 = 0
+
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
     public init(
@@ -93,6 +98,10 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
         let viewEnvironment = updateEnvironment(environment)
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: nil)
+        (view as? _NestedDynamicProperties)?._updateNestedDynamicProperties(
+            with: viewEnvironment,
+            previousValue: nil
+        )
 
         self.children = self.observe(with: backend) {
             view.children(
@@ -135,16 +144,47 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
             }
             cancellables.append(cancellable)
         }
+
+        (view as? _NestedDynamicProperties)?._forEachNestedObservableProperty { value in
+            let cancellable = value.didChange.observeAsUIUpdater(backend: backend) { [weak self] in
+                self?.bottomUpUpdate()
+            }
+            cancellables.append(cancellable)
+        }
     }
 
     func viewModelDidChange<B: BackendFeatures.Core>(backend: B) {
         bottomUpUpdate()
     }
 
-    /// Triggers the view to be updated as part of a bottom-up chain of updates (where either the
-    /// current view gets updated due to a state change and has potential to trigger its parent to
-    /// update as well, or the current view's child has propagated such an update upwards).
+    /// Queues the view to be updated as part of a bottom-up chain of updates
+    /// (where either the current view gets updated due to a state change and
+    /// has potential to trigger its parent to update as well, or the current
+    /// view's child has propagated such an update upwards).
+    ///
+    /// Updates are coalesced through ``ViewGraphUpdateScheduler`` so that a
+    /// single observable change read by many views doesn't run overlapping
+    /// subtree updates back to back.
     private func bottomUpUpdate() {
+        ViewGraphUpdateScheduler.enqueue(
+            self,
+            isCovered: { [weak self] in
+                guard let self else { return true }
+                return self.commitGeneration == ViewGraphUpdateScheduler.generation
+            },
+            run: { [weak self] in
+                self?.runBottomUpUpdate()
+            },
+            dispatch: { [backend] action in
+                backend.runInMainThread(action: action)
+            }
+        )
+    }
+
+    /// Performs a bottom-up update: recomputes the node's layout, propagating
+    /// to the parent (which commits the whole subtree) when the size changed,
+    /// or committing just this node's subtree otherwise.
+    private func runBottomUpUpdate() {
         // First we compute what size the view will be after the update. If it will change size,
         // propagate the update to this node's parent instead of updating straight away.
         let currentSize = currentLayout?.size
@@ -213,8 +253,44 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
             // current layout is being computed with caching, cause otherwise we could
             // end up using a layout computed with caching while computing a layout
             // without caching.
+            //
+            // The incoming view value must still be stored: an unchanged proposal
+            // does not imply an unchanged view (e.g. GeometryReader re-evaluates
+            // its content on every pass, and state updates produce new views at
+            // the same proposal). Keeping the stale view would commit outdated
+            // content.
+            if let newView {
+                let previousView = view
+                view = newView
+                let viewEnvironment = updateEnvironment(environment)
+                dynamicPropertyUpdater.update(
+                    view,
+                    with: viewEnvironment,
+                    previousValue: previousView
+                )
+                (view as? _NestedDynamicProperties)?._updateNestedDynamicProperties(
+                    with: viewEnvironment,
+                    previousValue: previousView
+                )
+            }
+            parentEnvironment = environment
             return currentLayout
         } else if environment.allowLayoutCaching, let cachedResult = resultCache[proposedSize] {
+            if let newView {
+                let previousView = view
+                view = newView
+                let viewEnvironment = updateEnvironment(environment)
+                dynamicPropertyUpdater.update(
+                    view,
+                    with: viewEnvironment,
+                    previousValue: previousView
+                )
+                (view as? _NestedDynamicProperties)?._updateNestedDynamicProperties(
+                    with: viewEnvironment,
+                    previousValue: previousView
+                )
+            }
+            parentEnvironment = environment
             // If this layout pass is a probing pass (not a final pass), then we
             // can reuse any layouts that we've computed since the cache was last
             // cleared. The cache gets cleared on commit.
@@ -235,6 +311,10 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
         let viewEnvironment = updateEnvironment(environment)
 
         dynamicPropertyUpdater.update(view, with: viewEnvironment, previousValue: previousView)
+        (view as? _NestedDynamicProperties)?._updateNestedDynamicProperties(
+            with: viewEnvironment,
+            previousValue: previousView
+        )
 
         let result = self.observe(with: backend) {
             view.computeLayout(
@@ -292,6 +372,8 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
                 ]
             )
         }
+
+        commitGeneration = ViewGraphUpdateScheduler.generation
 
         view.commit(
             widget,

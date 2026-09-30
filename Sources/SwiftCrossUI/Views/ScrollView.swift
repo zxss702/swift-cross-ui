@@ -47,6 +47,11 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         _ children: ScrollViewChildren<Content>,
         backend: Backend
     ) -> Backend.Widget {
+        backend.insert(
+            children.child.widget.into(),
+            into: children.innerContainer.into(),
+            at: 0
+        )
         return backend.createScrollContainer(for: children.innerContainer.into())
     }
 
@@ -62,7 +67,6 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         let willEarlyExit = Axis.allCases.allSatisfy({ axis in
             !axes.contains(axis) || proposedSize[component: axis] == nil
         })
-
         // Probe how big the child would like to be
         var childProposal = proposedSize
         for axis in Axis.allCases where axes.contains(axis) {
@@ -239,8 +243,6 @@ class ScrollViewChildren<Content: View>: ViewGraphNodeChildren {
         backend: Backend
     ) {
         self.children = children
-        let innerContainer = backend.createContainer()
-        backend.insert(children.child0.widget.into(), into: innerContainer, at: 0)
-        self.innerContainer = AnyWidget(innerContainer)
+        self.innerContainer = AnyWidget(backend.createContainer())
     }
 }

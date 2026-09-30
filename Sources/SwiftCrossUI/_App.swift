@@ -66,6 +66,7 @@ class _App<AppRoot: App>: ModelObserver {
             environment = backend.computeRootEnvironment(
                 defaultEnvironment: baseEnvironment
             )
+            EnvironmentValues.current = environment
 
             dynamicPropertyUpdater.update(app, with: environment, previousValue: nil)
 
@@ -104,6 +105,7 @@ class _App<AppRoot: App>: ModelObserver {
                 self.environment = self.backend.computeRootEnvironment(
                     defaultEnvironment: baseEnvironment
                 )
+                EnvironmentValues.current = self.environment
                 self.refreshSceneGraph()
             }
 

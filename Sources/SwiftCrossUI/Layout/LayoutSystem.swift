@@ -8,15 +8,21 @@ public enum LayoutSystem {
     }
 
     @_spi(Backends) public static func roundSize(_ size: Double) -> Int {
+        if size.isNaN {
+            logger.warning("LayoutSystem.roundSize(_:) called with NaN size")
+            return 0
+        }
         if size.isInfinite {
             logger.warning("LayoutSystem.roundSize(_:) called with infinite size")
         }
 
         let size = size.rounded(.up)
-        return if size >= Double(Int.max) {
-            Int.max
-        } else if size <= Double(Int.min) {
-            Int.min
+        // Clamp to Int32's range rather than Int's so that downstream
+        // arithmetic (adding padding, summing sizes, etc.) can't overflow.
+        return if size >= Double(Int32.max) {
+            Int(Int32.max)
+        } else if size <= Double(Int32.min) {
+            Int(Int32.min)
         } else {
             Int(size)
         }
@@ -151,7 +157,7 @@ public enum LayoutSystem {
                 result.participatesInStackLayouts
             }
 
-            let totalSpacing = Double(max(visibleChildrenCount - 1, 0) * spacing)
+            let totalSpacing = Double(max(visibleChildrenCount - 1, 0)) * spacing
             var size = ViewSize.zero
             size[component: orientation] = resultLength + totalSpacing
             size[component: perpendicularOrientation] = resultWidth
@@ -281,7 +287,7 @@ public enum LayoutSystem {
         let visibleChildrenCount = isHidden.filter { hidden in
             !hidden
         }.count
-        let totalSpacing = Double(max(visibleChildrenCount - 1, 0) * spacing)
+        let totalSpacing = Double(max(visibleChildrenCount - 1, 0)) * spacing
         totalReservedSpace += totalSpacing
 
         let sortedChildren = zip(children.indices, zip(priorities.map(-), flexibilities))
@@ -400,7 +406,7 @@ public enum LayoutSystem {
 
             backend.setPosition(ofChildAt: index, in: container, to: position.vector)
 
-            position[component: orientation] += child.size[component: orientation] + Double(spacing)
+            position[component: orientation] += child.size[component: orientation] + spacing
         }
     }
 

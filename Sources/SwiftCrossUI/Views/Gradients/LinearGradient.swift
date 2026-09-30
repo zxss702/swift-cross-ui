@@ -59,6 +59,19 @@ public struct LinearGradient: ElementaryView {
     }
 }
 
+extension LinearGradient: ShapeStyle {
+    /// Resolves the gradient to the color of its first stop.
+    ///
+    /// ``ShapeStyle`` resolution produces a single color; where a gradient
+    /// can be rendered as a view (e.g. via `AnyView`) the full gradient is
+    /// preserved instead.
+    @MainActor
+    public func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        gradient.stops.first?.color.resolve(in: environment)
+            ?? Color.clear.resolve(in: environment)
+    }
+}
+
 extension LinearGradient {
     /// Creates a linear gradient from a collection of colors.
     public init(

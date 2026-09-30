@@ -14,6 +14,21 @@ public struct Group<Content: View>: View {
         body = content
     }
 
+    public func children<Backend: BaseAppBackend>(
+        backend: Backend,
+        snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
+        environment: EnvironmentValues
+    ) -> any ViewGraphNodeChildren {
+        stackChildren(backend: backend, snapshots: snapshots, environment: environment)
+    }
+
+    public func layoutableChildren<Backend: BaseAppBackend>(
+        backend: Backend,
+        children: any ViewGraphNodeChildren
+    ) -> [LayoutSystem.LayoutableChild] {
+        stackLayoutableChildren(backend: backend, children: children)
+    }
+
     public func asWidget<Backend: BaseAppBackend>(
         _ children: any ViewGraphNodeChildren,
         backend: Backend

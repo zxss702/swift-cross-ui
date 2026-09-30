@@ -106,6 +106,39 @@ public struct List<SelectionValue: Hashable, RowView: View>: TypeSafeView, View 
         self.init(data, id: { $0[keyPath: id] }, selection: selection, rowContent: rowContent)
     }
 
+    /// Creates a list view without selection support, as in SwiftUI.
+    ///
+    /// - Parameters:
+    ///   - data: A collection of values to construct the list from.
+    ///   - id: A key path to the ID to use for an element of `data`.
+    ///   - rowContent: A view builder that renders a single row of the list.
+    ///     Receives an element of `data`.
+    public init<Data: RandomAccessCollection>(
+        _ data: Data,
+        id: KeyPath<Data.Element, SelectionValue>,
+        @ViewBuilder rowContent: @escaping (Data.Element) -> RowView
+    ) where Data.Index == Int {
+        self.init(data, id: id, selection: Binding<SelectionValue?>.constant(nil), rowContent: rowContent)
+    }
+
+    /// Creates a list view without selection support, as in SwiftUI.
+    ///
+    /// - Parameters:
+    ///   - data: A collection of values to construct the list from.
+    ///   - id: A closure that returns the ID to use for a given element of
+    ///     `data`.
+    ///   - selection: A binding to the ID of the value that is currently
+    ///     selected.
+    ///   - rowContent: A view builder that renders a single row of the list.
+    ///     Receives an element of `data`.
+    public init<Data: RandomAccessCollection>(
+        _ data: Data,
+        id: @escaping (Data.Element) -> SelectionValue,
+        @ViewBuilder rowContent: @escaping (Data.Element) -> RowView
+    ) where Data.Index == Int {
+        self.init(data, id: id, selection: Binding<SelectionValue?>.constant(nil), rowContent: rowContent)
+    }
+
     /// Creates a list view.
     ///
     /// - Parameters:
@@ -249,7 +282,7 @@ public struct List<SelectionValue: Hashable, RowView: View>: TypeSafeView, View 
             ofSelectableListView: widget,
             to: children.widgets.map { $0.into() },
             withRowHeights: childResults.map(\.size.height).map { height in
-                LayoutSystem.roundSize(height) + verticalBasePadding
+                LayoutSystem.roundSize(height + verticalBasePadding)
             }
         )
 

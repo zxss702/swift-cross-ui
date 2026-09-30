@@ -65,7 +65,7 @@ public struct Alignment: Hashable, Sendable {
                     0
                 case .center:
                     (parent.y - child.y) / 2
-                case .bottom:
+                case .bottom, .firstTextBaseline, .lastTextBaseline:
                     parent.y - child.y
             }
         return SIMD2(x, y)

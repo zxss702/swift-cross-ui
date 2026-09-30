@@ -26,7 +26,7 @@ public final class UIKitBackend:
     private var timeZoneObserver: NSObjectProtocol?
 
     public let scrollBarWidth = 0
-    public let defaultPaddingAmount = 15
+    public let defaultPaddingAmount: Double = 15
 
     // TODO: When tables are supported, update these
     public let defaultTableRowContentHeight = -1

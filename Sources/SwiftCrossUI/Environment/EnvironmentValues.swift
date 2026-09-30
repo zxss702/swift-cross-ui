@@ -4,6 +4,13 @@ import Foundation
 /// gets to modify the environment before passing it on to its children, which
 /// is the basis of many view modifiers.
 public struct EnvironmentValues {
+    /// The app's most recently computed root environment.
+    ///
+    /// Root environments already contain backend-provided values such as
+    /// `colorScheme`, so this gives platform code that lives outside the view
+    /// hierarchy (e.g. static `Color` definitions) access to them.
+    nonisolated(unsafe) public internal(set) static var current: EnvironmentValues?
+
     /// A font resolution context derived from the current environment.
     ///
     /// Essentially just a subset of the environment.
@@ -56,7 +63,7 @@ public struct EnvironmentValues {
     var allowLayoutCaching: Bool = false
 
     /// Backing storage for observable subscript
-    private var observableObjects: [ObjectIdentifier: any ObservableObject]
+    private var observableObjects: [ObjectIdentifier: AnyObject]
 
     /// Gets an environment value given an environment key's metatype.
     ///
@@ -72,9 +79,9 @@ public struct EnvironmentValues {
         }
     }
 
-    public subscript<T: ObservableObject>(observable key: T.Type) -> T? {
+    public subscript<T: AnyObject>(observable key: T.Type) -> T? {
         get {
-            guard let value = observableObjects[ObjectIdentifier(T.self)] as? T? else {
+            guard let value = observableObject(forType: T.self) as? T? else {
                 let message =
                     "EnvironmentValues type mismatch: value for key '\(T.self).self' doesn't match expected type '\(T.self)'"
                 logger.critical("\(message)")
@@ -85,6 +92,15 @@ public struct EnvironmentValues {
         set {
             observableObjects[ObjectIdentifier(T.self)] = newValue
         }
+    }
+
+    /// Looks up an environment object by its concrete runtime type.
+    ///
+    /// Unlike the `observable` subscript, this can be called through an
+    /// existential metatype because the key is derived from the metatype
+    /// *value* rather than a static generic parameter.
+    public func observableObject(forType type: AnyObject.Type) -> AnyObject? {
+        observableObjects[ObjectIdentifier(type)]
     }
 
     /// Brings the current window forward.
@@ -118,6 +134,16 @@ public struct EnvironmentValues {
     @available(tvOS, unavailable, message: "tvOS does not provide file system access")
     public var chooseFile: PresentSingleFileOpenDialogAction {
         PresentSingleFileOpenDialogAction(
+            backend: backend,
+            window: MainActorBox(value: window)
+        )
+    }
+
+    /// Presents an 'Open files' dialog fit for selecting multiple files.
+    @MainActor
+    @available(tvOS, unavailable, message: "tvOS does not provide file system access")
+    public var chooseFiles: PresentMultipleFilesOpenDialogAction {
+        PresentMultipleFilesOpenDialogAction(
             backend: backend,
             window: MainActorBox(value: window)
         )
@@ -259,7 +285,39 @@ extension EnvironmentValues {
     ///
     /// Inherited by ``ForEach`` and ``Group`` so that they can be used without
     /// affecting layout.
-    @Entry public var layoutSpacing: Int = 10
+    @Entry public var layoutSpacing: Double = 10
+
+    /// The horizontal spacing between cells in a ``Grid`` row, propagated
+    /// from the enclosing ``Grid``'s `horizontalSpacing`.
+    @Entry internal var gridHorizontalSpacing: Double?
+
+    /// The visibility of scroll indicators for scroll views within this
+    /// scope. Read by scroll views when backend support lands.
+    @Entry public var scrollIndicatorVisibility: ScrollIndicatorVisibility = .automatic
+
+    /// Whether scrolling is disabled for scroll views within this scope.
+    /// Read by scroll views when backend support lands.
+    @Entry public var scrollDisabled = false
+
+    /// Whether the view participates in scroll-target (paging) behavior.
+    /// Read by scroll views when scroll-targeting support lands.
+    @Entry internal var scrollTargetLayoutEnabled = false
+
+    /// The bounce behavior for scroll views within this scope. Read by
+    /// scroll views when bounce-behavior support lands.
+    @Entry public var scrollBounceBehavior = ScrollBounceBehavior.automatic
+
+    /// Whether scrollable views should avoid clipping to their bounds, as
+    /// recorded by ``View/scrollClipDisabled(_:)``.
+    @Entry public var scrollClipDisabled = false
+
+    /// The opacity of views within this scope. Applied by backends when
+    /// opacity support lands.
+    @Entry public var viewOpacity: Double = 1
+
+    /// The line spacing for text within this scope. Applied by text layout
+    /// when line-spacing support lands.
+    @Entry public var lineSpacing: Double?
 
     /// The current font.
     @Entry public var font: Font = .body
@@ -281,6 +339,14 @@ extension EnvironmentValues {
     /// `nil` displays the text without any case changes.
     @Entry public var textCase: Text.Case?
 
+    /// Whether to render text struck through. Backend rendering support is
+    /// pending; the value is carried so that backends can opt in.
+    @Entry public var textStrikethrough = false
+
+    /// Whether to render text underlined. Backend rendering support is
+    /// pending; the value is carried so that backends can opt in.
+    @Entry public var textUnderline = false
+
     /// The current color scheme of the current view scope.
     @Entry public var colorScheme: ColorScheme = .light
 
@@ -289,6 +355,12 @@ extension EnvironmentValues {
     /// `nil` means that the default foreground color of the current color scheme
     /// should be used.
     @Entry public var foregroundColor: Color?
+
+    /// The tint color of views within this view, as in SwiftUI's `View.tint`.
+    ///
+    /// Affects progress bars, and may affect other controls once the backends
+    /// learn to consume it.
+    @Entry public var tintColor: (any ShapeStyle)?
 
     /// Called when a text field gets submitted (usually due to the user
     /// pressing Enter/Return).
@@ -354,6 +426,22 @@ extension EnvironmentValues {
         }
         set {
             openWindowFunctionsByIDStore.wrappedValue = newValue
+        }
+    }
+
+    /// Backing store for ``EnvironmentValues/openWindowFunctionsByValueType``.
+    @Entry private var openWindowFunctionsByValueTypeStore = UncheckedSendable(
+        wrappedValue: Box<[ObjectIdentifier: @MainActor (Any) -> Void]>([:])
+    )
+
+    /// A mapping of presented value types to functions that open a window
+    /// bound to a value of that type.
+    internal var openWindowFunctionsByValueType: Box<[ObjectIdentifier: @MainActor (Any) -> Void]> {
+        get {
+            openWindowFunctionsByValueTypeStore.wrappedValue
+        }
+        set {
+            openWindowFunctionsByValueTypeStore.wrappedValue = newValue
         }
     }
 
@@ -493,6 +581,12 @@ extension EnvironmentValues {
 
     /// Whether to highlight a focused widget.
     @Entry public var focusEffectDisabled: Bool = false
+
+    /// Whether ``TextEditor`` wraps lines at the editor's width.
+    ///
+    /// Recorded in the environment; backends that support wrapping should
+    /// read it when configuring text editors.
+    @Entry public var textEditorWraps: Bool = true
 }
 
 extension EnvironmentValues {

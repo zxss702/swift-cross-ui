@@ -20,6 +20,18 @@ public struct ButtonStyle: Hashable, Sendable {
     /// due to the SwiftUI borderless behavior on mac being stupid.
     /// The only difference is a default foreground color of gray being applied.
     public static let borderless = Self(kind: .borderless)
+
+    /// A button style that applies a prominent bordered appearance.
+    ///
+    /// Currently rendered the same as ``ButtonStyle/bordered``; accent
+    /// prominence in backends is pending.
+    public static let borderedProminent = Self(kind: .bordered)
+
+    /// A button style that renders the label like a hyperlink.
+    ///
+    /// Currently rendered the same as ``ButtonStyle/borderless``; link
+    /// styling in backends is pending.
+    public static let link = Self(kind: .borderless)
 }
 
 extension ButtonStyle: CustomStringConvertible {

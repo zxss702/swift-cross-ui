@@ -1,3 +1,4 @@
+import Foundation
 /// Type to indicate the root of the NavigationStack. This is internal to prevent root accidentally showing instead
 /// of a detail view.
 struct NavigationStackRootPath: Codable {}
@@ -8,18 +9,66 @@ struct NavigationStackRootPath: Codable {}
 /// Use ``navigationDestination(for:destination:)`` on this view instead of its
 /// children, unlike Apple's SwiftUI API.
 public struct NavigationStack<Detail: View>: View {
+    @Environment(\.navigationDestinations) private var destinations
+    @Environment(\.windowChrome) private var windowChrome
+    @State private var unmanagedPath = NavigationPath()
+
     public var body: some View {
+        let inner: AnyView
         if let element = elements.last {
-            if let content = child(element) {
-                content
+            if let entry = element as? NavigationViewLinkEntry,
+                let view = destinations.viewDestinations[entry.id]
+            {
+                inner = view()
+            } else if let content = child(element) {
+                inner = AnyView(content)
+            } else if let resolver = destinations.resolvers[ObjectIdentifier(type(of: element))],
+                let content = resolver(element)
+            {
+                inner = content
             } else {
                 fatalError(
                     "Failed to find detail view for \"\(element)\", make sure you have called .navigationDestination for this type."
                 )
             }
         } else {
-            Text("Empty navigation path")
+            inner = AnyView(Text("Empty navigation path"))
         }
+        let content = EnvironmentModifier(inner) { environment in
+            environment.with(\.navigationPath, path)
+        }
+        // Render a lightweight inline navigation bar with a back button once
+        // the stack is deeper than the root, matching SwiftUI's chrome. On
+        // backends with integrated window chrome the back action is published
+        // into the title-bar strip instead of an inline row.
+        if windowChrome != nil {
+            return AnyView(
+                VStack(alignment: .leading, spacing: 0) {
+                    WindowChromeBackAttachment(
+                        content: content,
+                        canGoBack: elements.count > 1
+                    ) {
+                        path.wrappedValue.removeLast()
+                    }
+                }
+            )
+        }
+        return AnyView(
+            VStack(alignment: .leading, spacing: 0) {
+                if elements.count > 1 {
+                    Button {
+                        path.wrappedValue.removeLast()
+                    } label: {
+                        Text("‹")
+                            .font(.system(size: 28))
+                            .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(4)
+                }
+                content
+            }
+        )
     }
 
     /// A binding to the current navigation path.
@@ -58,6 +107,57 @@ public struct NavigationStack<Detail: View>: View {
         @ViewBuilder _ root: @escaping () -> Detail
     ) {
         self.path = path
+        destinationTypes = []
+        child = { element in
+            if element is NavigationStackRootPath {
+                return root()
+            } else {
+                return nil
+            }
+        }
+    }
+
+    /// Creates a navigation stack with homogeneous navigation state that you
+    /// can control, as in SwiftUI.
+    ///
+    /// - Parameters:
+    ///   - path: A ``Binding`` to an array of path elements.
+    ///   - root: The view to display when the stack is empty.
+    public init<Element: Hashable & Codable>(
+        path elements: Binding<[Element]>,
+        @ViewBuilder _ root: @escaping () -> Detail
+    ) {
+        self.path = Binding<NavigationPath>(
+            get: {
+                var path = NavigationPath()
+                for element in elements.wrappedValue {
+                    path.append(element)
+                }
+                return path
+            },
+            set: { newPath in
+                let resolved = newPath.path(destinationTypes: [Element.self])
+                elements.wrappedValue = resolved.compactMap { $0 as? Element }
+            }
+        )
+        destinationTypes = [Element.self]
+        child = { element in
+            if element is NavigationStackRootPath {
+                return root()
+            } else {
+                return nil
+            }
+        }
+    }
+
+    /// Creates a navigation stack with an internally managed navigation path.
+    ///
+    /// - Parameter root: The view to display when the stack is empty.
+    public init(
+        @ViewBuilder _ root: @escaping () -> Detail
+    ) {
+        _unmanagedPath = State(initialValue: NavigationPath())
+        self.path = _unmanagedPath.projectedValue
         destinationTypes = []
         child = { element in
             if element is NavigationStackRootPath {

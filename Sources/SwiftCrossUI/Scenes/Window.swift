@@ -49,8 +49,8 @@ public final class WindowNode<Content: View>: SceneGraphNode {
 
         let openOnAppLaunch =
             switch environment.defaultLaunchBehavior {
-                case .presented: true
-                case .automatic, .suppressed: false
+                case .automatic, .presented: true
+                case .suppressed: false
             }
 
         if openOnAppLaunch {

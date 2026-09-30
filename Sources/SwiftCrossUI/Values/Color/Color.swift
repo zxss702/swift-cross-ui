@@ -23,6 +23,31 @@ public struct Color: Sendable, Equatable, Hashable {
         self.opacityMultiplier = opacity
     }
 
+    /// A color space for colors constructed from component values.
+    public enum RGBColorSpace: Sendable, Hashable {
+        /// The standard RGB color space.
+        case sRGB
+        /// The linear variant of the sRGB color space.
+        case sRGBLinear
+        /// The Display P3 color space.
+        case displayP3
+    }
+
+    /// Creates a color from its components in the given color space, with
+    /// values between 0 and 1.
+    ///
+    /// The color space is currently only recorded; colors render in sRGB.
+    public init(
+        _ colorSpace: RGBColorSpace = .sRGB,
+        red: Double,
+        green: Double,
+        blue: Double,
+        opacity: Double = 1
+    ) {
+        self.representation = .rgb(red: red, green: green, blue: blue)
+        self.opacityMultiplier = opacity
+    }
+
     /// Creates a color from a brightness value between 0 and 1.
     public init(
         white: Double,

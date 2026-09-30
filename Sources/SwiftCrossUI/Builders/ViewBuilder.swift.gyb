@@ -3,7 +3,7 @@
 
 // swiftformat:options --allow-partial-wrapping true
 %{
-maximum_view_count = 20
+maximum_view_count = 32
 }%
 
 /// A result builder used to compose views together into composite views in
@@ -19,7 +19,7 @@ type_parameters = ", ".join(["V%d: View" % j for j in range(i + 1)])
 parameters = ", ".join(["_ view%d: V%d" % (j, j) for j in range(i + 1)])
 
 return_type_parameters = ", ".join(["V%d" % j for j in range(i + 1)])
-return_type = "TupleView%d<\n        %s\n    >" % (i + 1, return_type_parameters)
+return_type = "V0" if i == 0 else "TupleView%d<\n        %s\n    >" % (i + 1, return_type_parameters)
 return_type_init_parameters = ", ".join(["view%d" % j for j in range(i + 1)])
 }%
 
@@ -28,7 +28,11 @@ return_type_init_parameters = ", ".join(["view%d" % j for j in range(i + 1)])
     >(
         ${parameters}
     ) -> ${return_type} {
+% if i == 0:
+        return view0
+% else:
         return ${return_type}(${return_type_init_parameters})
+% end
     }
 % end
 

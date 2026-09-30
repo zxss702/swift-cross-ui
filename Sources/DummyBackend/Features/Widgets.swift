@@ -1,7 +1,7 @@
 @_spi(Backends) import SwiftCrossUI
 
 extension DummyBackend: BackendFeatures.Widgets {
-    public var defaultPaddingAmount: Int { 10 }
+    public var defaultPaddingAmount: Double { 10 }
 
     public func show(widget: Widget) {}
 

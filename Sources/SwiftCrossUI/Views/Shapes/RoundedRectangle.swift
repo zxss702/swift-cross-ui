@@ -19,6 +19,26 @@ public struct RoundedRectangle {
         self.cornerRadius = cornerRadius
     }
 
+    /// Creates a rounded rectangle with a corner style.
+    ///
+    /// - Parameters:
+    ///   - cornerRadius: The corner radius for this rounded rectangle.
+    ///   - style: The corner style; `.continuous` is rendered as the same
+    ///     circular radius as `.circular` until squircle rendering lands.
+    public init(cornerRadius: Double, style: RoundedCornerStyle) {
+        self.init(cornerRadius: cornerRadius)
+    }
+
+    /// Creates a rounded rectangle with independent corner dimensions.
+    ///
+    /// - Parameters:
+    ///   - cornerSize: The width and height of the corners. The height is used
+    ///     as the corner radius.
+    ///   - style: The corner style.
+    public init(cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
+        self.init(cornerRadius: cornerSize.height)
+    }
+
     /// This shape tries to mimic an order 5 superellipse, extending the sides with line segments.
     /// Since paths don't support quintic curves, I'm using an approximation consisting of
     /// two cubic curves and a line segment. This constant is the list of control points for

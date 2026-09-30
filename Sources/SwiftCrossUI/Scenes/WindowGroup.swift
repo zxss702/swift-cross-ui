@@ -13,6 +13,12 @@ public struct WindowGroup<Content: View>: WindowingScene {
     /// This should never change after creation.
     let id: String?
 
+    /// The type of value this group presents, if it was created with
+    /// ``WindowGroup/init(for:id:content:)``.
+    var valueType: Any.Type?
+    /// Produces a content closure bound to a freshly presented value.
+    var contentForValue: ((Any) -> () -> Content)?
+
     /// Creates a window group optionally specifying a title and an ID. Window title
     /// defaults to `ProcessInfo.processInfo.processName`.
     public init(
@@ -28,6 +34,41 @@ public struct WindowGroup<Content: View>: WindowingScene {
         self.id = id
         self.title = title
         self.content = content
+        self.valueType = nil
+        self.contentForValue = nil
+    }
+
+    /// Creates a window group that presents windows bound to a value of the
+    /// given type, as in SwiftUI.
+    ///
+    /// Windows are opened via `openWindow(value:)`. Each opened window gets
+    /// its own `Binding` seeded with the presented value.
+    public init<D: Codable & Hashable, C: View>(
+        for type: D.Type = D.self,
+        id: String? = nil,
+        @ViewBuilder content: @escaping (Binding<D?>) -> C
+    ) where Content == C {
+        #if os(WASI)
+            let title = ProcessInfo.processInfo.processName
+        #else
+            let title = ProcessInfo.processInfo.processName
+        #endif
+        self.id = id
+        self.title = title
+        self.valueType = D.self
+        self.contentForValue = { value in
+            var stored = value as? D
+            let binding = Binding<D?>(
+                get: { stored },
+                set: { stored = $0 }
+            )
+            return { content(binding) }
+        }
+        // Fallback content for programmatically opened (value-less) windows.
+        self.content = {
+            var stored: D? = nil
+            return content(Binding(get: { stored }, set: { stored = $0 }))
+        }
     }
 }
 
@@ -40,6 +81,11 @@ public final class WindowGroupNode<Content: View>: SceneGraphNode {
     ///
     /// Empty if there are currently no instances of the window.
     private var windowReferences: [UUID: WindowReference<WindowGroup<Content>>] = [:]
+
+    /// The value each value-opened window was presented with, so that updates
+    /// can rebuild the window's content binding from the latest scene instead
+    /// of reverting it to the value-less fallback content.
+    private var windowValues: [UUID: Any] = [:]
 
     /// The underlying scene.
     private var scene: WindowGroup<Content>
@@ -114,9 +160,48 @@ public final class WindowGroupNode<Content: View>: SceneGraphNode {
             }
         }
 
-        for windowReference in windowReferences.values {
+        if let valueType = scene.valueType, let contentForValue = scene.contentForValue {
+            environment.openWindowFunctionsByValueType.value[ObjectIdentifier(valueType)] = {
+                [weak self] value in
+                guard let self else { return }
+
+                var scene = scene
+                scene.content = contentForValue(value)
+
+                let windowID = UUID()
+                let reference = WindowReference(
+                    scene: scene,
+                    backend: backend,
+                    environment: environment,
+                    onClose: {
+                        self.windowReferences[windowID] = nil
+                        self.windowValues[windowID] = nil
+                    },
+                    id: nextId()
+                )
+                windowReferences[windowID] = reference
+                windowValues[windowID] = value
+
+                reference.update(
+                    nil,
+                    backend: backend,
+                    environment: environment
+                )
+            }
+        }
+
+        for (windowID, windowReference) in windowReferences {
+            var windowScene = scene
+            // Windows opened with a value keep their own bound content; rebuild
+            // it from the latest scene so updates don't revert them to the
+            // value-less fallback content.
+            if let value = windowValues[windowID],
+                let contentForValue = scene.contentForValue
+            {
+                windowScene.content = contentForValue(value)
+            }
             windowReference.update(
-                scene,
+                windowScene,
                 backend: backend,
                 environment: environment
             )

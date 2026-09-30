@@ -29,6 +29,25 @@ extension View {
             actions: actions()
         )
     }
+
+    /// Shows an alert with the given title and message, as in SwiftUI.
+    ///
+    /// The message view is currently only consulted for its text; a
+    /// `Text`-returning message builder is supported.
+    public func alert(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        @AlertActionsBuilder actions: () -> [AlertAction],
+        @ViewBuilder message: () -> some View
+    ) -> some View {
+        AlertModifierView(
+            child: self,
+            title: title,
+            isPresented: isPresented,
+            actions: actions(),
+            message: (message() as? Text)?.string
+        )
+    }
 }
 
 struct AlertModifierView<Child: View>: TypeSafeView {
@@ -40,6 +59,7 @@ struct AlertModifierView<Child: View>: TypeSafeView {
     var title: String
     var isPresented: Binding<Bool>
     var actions: [AlertAction]
+    var message: String?
 
     func children<Backend: BaseAppBackend>(
         backend: Backend,
@@ -95,6 +115,11 @@ struct AlertModifierView<Child: View>: TypeSafeView {
                 alert,
                 title: title,
                 actionLabels: actions.map(\.label),
+                environment: environment
+            )
+            backend.updateAlertBody(
+                alert,
+                body: message,
                 environment: environment
             )
             backend.showAlert(

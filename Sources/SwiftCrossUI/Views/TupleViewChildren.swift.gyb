@@ -3,7 +3,7 @@
 
 // swiftformat:options --allow-partial-wrapping true
 %{
-maximum_child_count = 20
+maximum_child_count = 32
 }%
 
 protocol TupleViewChildren: ViewGraphNodeChildren {

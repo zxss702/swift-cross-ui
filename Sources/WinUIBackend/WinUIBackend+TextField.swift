@@ -1,4 +1,5 @@
 @_spi(Backends) import SwiftCrossUI
+import UWP
 import WinUI
 
 // Many force tries are required for the WinUI backend but we don't really want them
@@ -38,6 +39,7 @@ extension WinUIBackend {
         environment.apply(to: textField)
 
         updateInputScope(of: textField, textContentType: environment.textContentType)
+        applyTextFieldStyle(of: textField, style: environment.textFieldStyle)
     }
 
     public func setContent(ofTextField textField: Widget, to content: String) {
@@ -84,6 +86,7 @@ extension WinUIBackend {
         environment.apply(to: secureField)
 
         updateInputScope(of: secureField, textContentType: environment.textContentType)
+        applyTextFieldStyle(of: secureField, style: environment.textFieldStyle)
     }
 
     public func setContent(ofSecureField secureField: Widget, to content: String) {
@@ -92,6 +95,20 @@ extension WinUIBackend {
 
     public func getContent(ofSecureField secureField: Widget) -> String {
         (secureField as! PasswordBox).password
+    }
+}
+
+extension WinUIBackend {
+    /// Applies the resolved ``TextFieldStyle`` to a WinUI text control.
+    /// `.plain` removes the native border and background so the field reads
+    /// as bare text on the window's background, like on macOS.
+    func applyTextFieldStyle(of control: WinUI.Control, style: SwiftCrossUI.TextFieldStyle) {
+        guard style == .plain else { return }
+        control.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
+        let transparent = UWP.Color(a: 0, r: 0, g: 0, b: 0)
+        let background = WinUI.SolidColorBrush()
+        background.color = transparent
+        control.background = background
     }
 }
 

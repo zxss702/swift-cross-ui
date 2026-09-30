@@ -3,7 +3,7 @@
 
 // swiftformat:options --allow-partial-wrapping true
 %{
-maximum_view_count = 20
+maximum_view_count = 32
 }%
 
 @MainActor

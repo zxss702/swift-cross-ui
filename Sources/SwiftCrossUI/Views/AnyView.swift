@@ -5,7 +5,7 @@ import Foundation
 /// Useful in dynamic use-cases such as hot reloading, but not recommended if
 /// there are alternate strongly-typed solutions to your problem since
 /// ``AnyView`` has significantly more overhead than strongly typed views.
-public struct AnyView {
+public struct AnyView: @unchecked Sendable {
     var child: any View
 
     public init(_ child: any View) {

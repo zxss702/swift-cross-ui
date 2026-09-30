@@ -6,7 +6,7 @@ extension BackendFeatures {
     ///   your ``MenuButtons/menuImplementationStyle-4blzf`` (that is, what would work best
     ///   for your backend's underlying UI framework).
     @MainActor
-    public protocol MenuButtons<Menu>: Core, StringLabelButtons {
+    public protocol MenuButtons<Menu>: Core, StringLabelButtons, ViewLabelButtons {
         /// The underlying menu type. Can be a wrapper or subclass.
         associatedtype Menu
 
@@ -62,8 +62,33 @@ extension BackendFeatures {
             menu: Menu,
             environment: EnvironmentValues
         )
-    }
 
+        /// Attaches a menu to a button whose content is provided by a custom
+        /// view label (created via ``SwiftCrossUI/Menu/init(content:label:)``).
+        ///
+        /// - Parameters:
+        ///   - button: The button to update.
+        ///   - menu: The menu to show when the button is clicked/tapped.
+        ///   - environment: The current environment.
+        func setButtonMenu(
+            _ button: Widget,
+            menu: Menu,
+            environment: EnvironmentValues
+        )
+    }
+}
+
+extension BackendFeatures.AttachedMenus {
+    /// The default implementation does nothing; backends that can attach
+    /// menus to arbitrary buttons should override it.
+    public func setButtonMenu(
+        _ button: Widget,
+        menu: Menu,
+        environment: EnvironmentValues
+    ) {}
+}
+
+extension BackendFeatures {
     /// Backend methods for menus which need a separate widget to be created.
     @MainActor
     public protocol PopoverMenus<Widget, Menu>: MenuButtons {

@@ -6,16 +6,32 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
 
     var body: TupleView2<EnvironmentModifier<Sidebar>, Detail>
 
+    /// Whether the sidebar pane attaches to the trailing edge of the split
+    /// view rather than the leading edge.
+    var paneOnTrailingEdge = false
+
+    /// Whether the sidebar pane is visible at all.
+    var isPaneVisible = true
+
     /// Creates a two-column split view.
     ///
     /// - Parameters:
     ///   - sidebar: The sidebar content.
     ///   - detail: The detail content.
-    init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+    ///   - paneOnTrailingEdge: Whether the pane attaches to the trailing edge.
+    ///   - isPaneVisible: Whether the pane is visible.
+    init(
+        @ViewBuilder sidebar: () -> Sidebar,
+        @ViewBuilder detail: () -> Detail,
+        paneOnTrailingEdge: Bool = false,
+        isPaneVisible: Bool = true
+    ) {
         body = TupleView2(
             EnvironmentModifier(sidebar()) { $0.with(\.listStyle, .sidebar) },
             detail()
         )
+        self.paneOnTrailingEdge = paneOnTrailingEdge
+        self.isPaneVisible = isPaneVisible
     }
 
     func children<Backend: BaseAppBackend>(
@@ -50,7 +66,11 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
-        let leadingWidth = Double(backend.sidebarWidth(ofSplitView: widget))
+        let columnWidth = environment.applyingModifiers(of: body.view0)
+            .navigationSplitViewColumnWidth
+        let leadingWidth = isPaneVisible
+            ? (columnWidth?.ideal ?? Double(backend.sidebarWidth(ofSplitView: widget)))
+            : 0
 
         // TODO: If computeLayout ever becomes a pure requirement of View, then we
         //   can delay this until commit.
@@ -126,21 +146,41 @@ struct SplitView<Sidebar: View, Detail: View>: TypeSafeView, View {
             environment.onResize(.zero)
         }
 
-        let leadingWidth = backend.sidebarWidth(ofSplitView: widget)
+        let columnWidth = environment.applyingModifiers(of: body.view0)
+            .navigationSplitViewColumnWidth
+        let leadingWidth: Int
+        if let columnWidth {
+            leadingWidth = isPaneVisible
+                ? LayoutSystem.roundSize(columnWidth.ideal)
+                : 0
+            backend.setSidebarWidthBounds(
+                ofSplitView: widget,
+                minimum: LayoutSystem.roundSize(columnWidth.min),
+                maximum: LayoutSystem.roundSize(columnWidth.max)
+            )
+            backend.setSidebarWidth(ofSplitView: widget, to: leadingWidth)
+        } else {
+            leadingWidth = backend.sidebarWidth(ofSplitView: widget)
+            backend.setSidebarWidthBounds(
+                ofSplitView: widget,
+                minimum: LayoutSystem.roundSize(children.minimumLeadingWidth),
+                maximum: LayoutSystem.roundSize(
+                    max(
+                        children.minimumLeadingWidth,
+                        layout.size.width - children.minimumTrailingWidth
+                    )
+                )
+            )
+            if !isPaneVisible {
+                backend.setSidebarWidth(ofSplitView: widget, to: 0)
+            }
+        }
+        backend.setSplitViewPaneOnTrailingEdge(widget, to: paneOnTrailingEdge)
+
         let leadingResult = children.leadingChild.commit()
         let trailingResult = children.trailingChild.commit()
 
         backend.setSize(of: widget, to: layout.size.vector)
-        backend.setSidebarWidthBounds(
-            ofSplitView: widget,
-            minimum: LayoutSystem.roundSize(children.minimumLeadingWidth),
-            maximum: LayoutSystem.roundSize(
-                max(
-                    children.minimumLeadingWidth,
-                    layout.size.width - children.minimumTrailingWidth
-                )
-            )
-        )
 
         // Center pane children
         backend.setPosition(

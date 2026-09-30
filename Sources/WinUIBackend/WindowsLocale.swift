@@ -3,7 +3,19 @@ import WinSDK
 @_spi(Backends) import SwiftCrossUI
 
 private func getLocaleInfoString(_ type: Int32, bufferSize: Int) -> String? {
-    withUnsafeTemporaryAllocation(of: CWideChar.self, capacity: bufferSize) { ptr in
+    // LOCALE_SSCRIPTS and similar can legitimately exceed the requested buffer
+    // size (e.g. for multi-script locales). Query the required size first and
+    // treat an oversized result as "no value" rather than an error.
+    let required = GetLocaleInfoEx(nil, LCTYPE(type), nil, 0)
+    if required == 0 {
+        logger.warning("Error getting locale info: \(GetLastError())")
+        return nil
+    }
+    if Int(required) > bufferSize {
+        return nil
+    }
+
+    return withUnsafeTemporaryAllocation(of: CWideChar.self, capacity: bufferSize) { ptr in
         // LOCALE_NAME_USER_DEFAULT is a #define for NULL. With no type context, Swift can't infer
         // the correct type. Pass nil directly instead.
         // The LOCALE_ constants are typed as Int32. LCTYPE is UInt32. So those have to be converted.
@@ -18,7 +30,8 @@ private func getLocaleInfoString(_ type: Int32, bufferSize: Int) -> String? {
             logger.warning("Error getting locale info: \(GetLastError())")
             return nil
         } else {
-            let slice = ptr[..<Int(size)]
+            // The returned count includes the terminating NUL.
+            let slice = ptr[..<max(Int(size) - 1, 0)]
             return String(decoding: slice, as: UTF16.self)
         }
     }

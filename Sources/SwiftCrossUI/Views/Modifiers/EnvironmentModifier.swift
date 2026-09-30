@@ -71,7 +71,7 @@ extension View {
     /// Adds an observable object to the environment of the enclosed View.
     /// You are responsible for ensuring that the object is being observed
     /// by a parent view, as this modifier does not perform any observation.
-    public func environment<T: ObservableObject>(_ object: T) -> some View {
+    public func environment<T: AnyObject>(_ object: T) -> some View {
         EnvironmentModifier(self) { environment in
             var environment = environment
             environment[observable: T.self] = object
@@ -83,7 +83,49 @@ extension View {
     /// You are responsible for ensuring that the object is being observed
     /// by a parent view, as this modifier does not perform any observation.
     @available(*, deprecated, renamed: "environment", message: "Use `environment(_:)` instead.")
-    public func environmentObject<T: ObservableObject>(_ object: T) -> some View {
+    public func environmentObject<T: AnyObject>(_ object: T) -> some View {
         environment(object)
+    }
+}
+
+/// A view that modifies the environment passed to its content. Containers
+/// such as ``SplitView`` use this to inspect environment values (like
+/// ``EnvironmentValues/navigationSplitViewColumnWidth``) applied directly to
+/// their children, which would otherwise be invisible to the parent.
+protocol EnvironmentModifyingView {
+    /// Applies this view's environment modification.
+    func modifyEnvironment(_ environment: EnvironmentValues) -> EnvironmentValues
+    /// The content that the modification applies to.
+    var environmentModifiedContent: any View { get }
+}
+
+extension EnvironmentModifier: EnvironmentModifyingView {
+    func modifyEnvironment(_ environment: EnvironmentValues) -> EnvironmentValues {
+        modification(environment)
+    }
+
+    var environmentModifiedContent: any View {
+        body.view0
+    }
+}
+
+extension EnvironmentValues {
+    /// Returns the environment that a view's outer chain of
+    /// ``EnvironmentModifier``s produces when applied to this environment.
+    /// Stops at the first non-environment-modifying wrapper.
+    func applyingModifiers(of view: any View) -> EnvironmentValues {
+        var environment = self
+        var current = view
+        while true {
+            if let modifier = current as? EnvironmentModifyingView {
+                environment = modifier.modifyEnvironment(environment)
+                current = modifier.environmentModifiedContent
+            } else if let wrapper = current as? TransparentWrappingView {
+                current = wrapper.wrappedContent
+            } else {
+                break
+            }
+        }
+        return environment
     }
 }

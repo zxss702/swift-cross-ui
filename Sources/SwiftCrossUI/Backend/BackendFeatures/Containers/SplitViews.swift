@@ -43,5 +43,40 @@ extension BackendFeatures {
             minimum minimumWidth: Int,
             maximum maximumWidth: Int
         )
+
+        /// Sets the width of a split view's sidebar.
+        ///
+        /// A width of zero hides the sidebar entirely.
+        ///
+        /// - Parameters:
+        ///   - splitView: The split view.
+        ///   - width: The sidebar's width, or zero to hide the sidebar.
+        func setSidebarWidth(
+            ofSplitView splitView: Widget,
+            to width: Int
+        )
+
+        /// Sets which edge of the split view the sidebar pane attaches to.
+        ///
+        /// - Parameters:
+        ///   - splitView: The split view.
+        ///   - isOnTrailingEdge: Whether the pane is on the trailing edge.
+        ///     When `false`, the pane is on the leading edge.
+        func setSplitViewPaneOnTrailingEdge(
+            _ splitView: Widget,
+            to isOnTrailingEdge: Bool
+        )
     }
+}
+
+extension BackendFeatures.SplitViews {
+    public func setSidebarWidth(
+        ofSplitView splitView: Widget,
+        to width: Int
+    ) {}
+
+    public func setSplitViewPaneOnTrailingEdge(
+        _ splitView: Widget,
+        to isOnTrailingEdge: Bool
+    ) {}
 }

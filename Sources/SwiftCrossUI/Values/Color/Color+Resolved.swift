@@ -28,6 +28,25 @@ extension Color {
             self.blue = blue
             self.opacity = opacity
         }
+
+        /// The system red color.
+        public static let systemRed = Resolved(red: 1, green: 0.231, blue: 0.188)
+        /// The system green color.
+        public static let systemGreen = Resolved(red: 0.157, green: 0.78, blue: 0.243)
+        /// The system blue color.
+        public static let systemBlue = Resolved(red: 0, green: 0.478, blue: 1)
+        /// The system yellow color.
+        public static let systemYellow = Resolved(red: 1, green: 0.8, blue: 0)
+        /// The system orange color.
+        public static let systemOrange = Resolved(red: 1, green: 0.584, blue: 0)
+        /// The system purple color.
+        public static let systemPurple = Resolved(red: 0.686, green: 0.322, blue: 0.871)
+        /// The system pink color.
+        public static let systemPink = Resolved(red: 1, green: 0.176, blue: 0.333)
+        /// The system teal color.
+        public static let systemTeal = Resolved(red: 0.188, green: 0.69, blue: 0.78)
+        /// The system gray color.
+        public static let systemGray = Resolved(red: 0.557, green: 0.557, blue: 0.576)
     }
 
     /// Resolves this color in the given environment.
