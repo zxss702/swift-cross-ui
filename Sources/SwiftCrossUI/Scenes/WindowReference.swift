@@ -394,7 +394,6 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
             windowChromeModel?.onDidChange = { [weak self] in
                 self?.scheduleDeferredChromeRefresh(backend: backend)
             }
-            Self.hoverLog("chromeCommit(update)")
             _ = chromeGraph.computeLayout(
                 with: WindowChromeBar(),
                 proposedSize: ProposedViewSize(
@@ -409,8 +408,6 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
         }
 
         if isFirstUpdate {
-            FileHandle.standardError.write(
-                "[T \(Date().timeIntervalSince1970)] WindowReference first show\n".data(using: .utf8)!)
             backend.show(window: window)
             isFirstUpdate = false
         }
@@ -433,7 +430,6 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
                 let chromeGraph = self.chromeGraph,
                 let environment = self.chromeEnvironment
             else { return }
-            Self.hoverLog("chromeCommit(deferred)")
             _ = chromeGraph.computeLayout(
                 with: WindowChromeBar(),
                 proposedSize: ProposedViewSize(
@@ -473,23 +469,5 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
             // provided by a higher scene or the system.
             environment.colorScheme = outerColorScheme
         }
-    }
-
-    /// Temporary diagnostics: appends a timestamped line to the same log the
-    /// WinUI chrome probe writes, so hover enter/exit events can be aligned
-    /// with chrome commits on one timeline.
-    static func hoverLog(_ msg: String) {
-        #if os(Windows)
-        let logPath = ProcessInfo.processInfo.environment["TEMP"]
-            .map { $0 + "\\sy_hover.log" } ?? "C:\\Temp\\sy_hover.log"
-        let line = "\(Date()) \(msg)\n"
-        if let h = FileHandle(forWritingAtPath: logPath) {
-            h.seekToEndOfFile()
-            h.write(line.data(using: .utf8)!)
-            try? h.close()
-        } else {
-            try? line.write(toFile: logPath, atomically: true, encoding: .utf8)
-        }
-        #endif
     }
 }

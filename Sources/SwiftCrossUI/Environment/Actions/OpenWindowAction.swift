@@ -57,9 +57,6 @@ public struct OpenWindowAction {
             )
             return
         }
-        if ProcessInfo.processInfo.environment["SY_PROBE"] != nil {
-            FileHandle.standardError.write("[PROBE] openWindow(value:\(D.self)) dispatch\n".data(using: .utf8)!)
-        }
         openWindow(value)
     }
 }

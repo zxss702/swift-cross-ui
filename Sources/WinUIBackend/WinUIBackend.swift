@@ -393,12 +393,79 @@ public final class WinUIBackend:
         try? window.appWindow.resizeClient(size)
     }
 
+    /// Subclass ID for the `WM_GETMINMAXINFO` handler installed by
+    /// `setSizeLimits` (arbitrary, unique per window).
+    private static let minMaxSubclassID: UINT_PTR = 0x53594D58
+
+    /// `AppWindow` exposes no min/max-size API, so limits are enforced by
+    /// subclassing the window's `HWND` and answering `WM_GETMINMAXINFO`
+    /// ourselves — this clamps the size *before* the resize happens, which
+    /// also prevents the resize-fight flicker between the dragged size and
+    /// the content's minimum.
+    private static let windowMinMaxSubclassProc: SUBCLASSPROC = {
+        hwnd, message, wParam, lParam, _, refData in
+        // Let the default proc fill in the usual track bounds first.
+        let result = DefSubclassProc(hwnd, message, wParam, lParam)
+        guard message == WM_GETMINMAXINFO,
+            let hwnd,
+            refData != 0,
+            let windowPointer = UnsafeRawPointer(bitPattern: UInt(refData)),
+            let info = UnsafeMutablePointer<MINMAXINFO>(
+                bitPattern: Int(bitPattern: UInt(lParam)))
+        else { return result }
+        let window = Unmanaged<CustomWindow>
+            .fromOpaque(windowPointer)
+            .takeUnretainedValue()
+
+        // `ptMinTrackSize`/`ptMaxTrackSize` bound the whole window rect, so
+        // measure the live non-client overhead (borders + any caption frame)
+        // at the window's current DPI rather than guessing metrics.
+        var windowRect = RECT()
+        var clientRect = RECT()
+        GetWindowRect(hwnd, &windowRect)
+        GetClientRect(hwnd, &clientRect)
+        let frameWidth =
+            (windowRect.right - windowRect.left)
+            - (clientRect.right - clientRect.left)
+        let frameHeight =
+            (windowRect.bottom - windowRect.top)
+            - (clientRect.bottom - clientRect.top)
+
+        let scale = window.scaleFactor
+        let chrome = Double(window.contentHeightAdjustment) * scale
+        func toWindowPixels(_ size: SIMD2<Int>) -> POINT {
+            POINT(
+                x: Int32(
+                    (Double(size.x) * scale).rounded(.awayFromZero)) + frameWidth,
+                y: Int32(
+                    (Double(size.y) * scale + chrome).rounded(.awayFromZero))
+                    + frameHeight
+            )
+        }
+        if let minimum = window.minimumSizeLimit {
+            info.pointee.ptMinTrackSize = toWindowPixels(minimum)
+        }
+        if let maximum = window.maximumSizeLimit {
+            info.pointee.ptMaxTrackSize = toWindowPixels(maximum)
+        }
+        return result
+    }
+
     public func setSizeLimits(
         ofWindow window: Window,
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {
-        debugLogOnce("\(#function) unimplemented")
+        window.minimumSizeLimit = minimumSize
+        window.maximumSizeLimit = maximumSize
+        guard !window.minMaxSubclassInstalled, let hwnd = window.getHWND()
+        else { return }
+        window.minMaxSubclassInstalled = SetWindowSubclass(
+            hwnd,
+            Self.windowMinMaxSubclassProc,
+            Self.minMaxSubclassID,
+            DWORD_PTR(UInt(bitPattern: Unmanaged.passUnretained(window).toOpaque()))
+        )
     }
 
     public func setResizeHandler(
@@ -519,15 +586,11 @@ public final class WinUIBackend:
     }
 
     public func activate(window: Window) {
-        FileHandle.standardError.write(
-            "[T \(Date().timeIntervalSince1970)] activate enter\n".data(using: .utf8)!)
         do {
             try window.activate()
         } catch {
             logger.warning("Failed to activate window: \(error)")
         }
-        FileHandle.standardError.write(
-            "[T \(Date().timeIntervalSince1970)] activate exit\n".data(using: .utf8)!)
     }
 
     public func close(window: Window) {
@@ -738,7 +801,6 @@ public final class WinUIBackend:
 
         // NB: This event fires when the window is activated _or_ deactivated.
         window.activated.addHandler { _, args in
-            Self.hoverLog("windowActivated state=\(String(describing: args?.windowActivationState))")
             if let rootHandler = self.rootEnvironmentChangeHandler {
                 // Defer the refresh to the next dispatcher turn: `activated`
                 // fires synchronously inside `activate()` (i.e. mid-window-
@@ -794,17 +856,11 @@ public final class WinUIBackend:
 
     public func removeAllChildren(of container: Widget) {
         let container = container as! WinUI.Canvas
-        if windows.contains(where: { $0.chromeContainer === container }) {
-            Self.hoverLog("chromeRemoveAll")
-        }
         container.children.clear()
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         let container = container as! WinUI.Canvas
-        if windows.contains(where: { $0.chromeContainer === container }) {
-            Self.hoverLog("chromeInsert idx=\(index)")
-        }
         container.children.insertAt(UInt32(index), child)
     }
 
@@ -814,9 +870,6 @@ public final class WinUIBackend:
         let container = container as! WinUI.Canvas
         let largerIndex = UInt32(max(firstIndex, secondIndex))
         let smallerIndex = UInt32(min(firstIndex, secondIndex))
-        if windows.contains(where: { $0.chromeContainer === container }) {
-            Self.hoverLog("chromeSwap \(smallerIndex)<->\(largerIndex)")
-        }
         let element1 = container.children[Int(smallerIndex)]
         let element2 = container.children[Int(largerIndex)]
         container.children.removeAt(largerIndex)
@@ -827,9 +880,6 @@ public final class WinUIBackend:
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! WinUI.Canvas
-        if windows.contains(where: { $0.chromeContainer === container }) {
-            Self.hoverLog("chromeRemove idx=\(index)")
-        }
         container.children.removeAt(UInt32(index))
     }
 
@@ -2125,12 +2175,6 @@ public final class WinUIBackend:
             guard let tapGestureTarget else { return }
             tapGestureTarget.clickHandler?()
         }
-        tapGestureTarget.pointerEntered.addHandler { _, _ in
-            Self.hoverLog("tapTarget Entered")
-        }
-        tapGestureTarget.pointerExited.addHandler { _, _ in
-            Self.hoverLog("tapTarget Exited")
-        }
         return tapGestureTarget
     }
 
@@ -2783,6 +2827,14 @@ public class CustomWindow: WinUI.Window {
     /// rebuild releases the flyout items, including any that are mid-click).
     var appliedMenuSignature: String?
 
+    /// Content-area size limits in DIPs, enforced at the OS level by the
+    /// `WM_GETMINMAXINFO` subclass proc. The chrome strip lives inside the
+    /// client area, so `contentHeightAdjustment` is folded in when
+    /// converting to physical window sizes.
+    var minimumSizeLimit: SIMD2<Int>?
+    var maximumSizeLimit: SIMD2<Int>?
+    var minMaxSubclassInstalled = false
+
     /// The height of the system caption-button strip in DIPs. The chrome
     /// strip matches it exactly so the caption buttons and the chrome content
     /// share a single row.
@@ -2871,8 +2923,6 @@ public class CustomWindow: WinUI.Window {
 
         // NB: This event fires when the window is activated _or_ deactivated.
         self.activated.addHandler { [weak self] _, args in
-            FileHandle.standardError.write(
-                "[T \(Date().timeIntervalSince1970)] activated event state=\(String(describing: args?.windowActivationState))\n".data(using: .utf8)!)
             switch args?.windowActivationState {
                 case .codeActivated, .pointerActivated: self?.isActive = true
                 case .deactivated: self?.isActive = false
