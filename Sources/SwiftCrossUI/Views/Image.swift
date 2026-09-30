@@ -17,6 +17,11 @@ public struct Image: Sendable {
         /// platforms, symbol images size themselves relative to the current
         /// font rather than at their pixel size, and are always resizable.
         case symbol(URL)
+        /// A system symbol rendered natively as an icon-font glyph (e.g.
+        /// Segoe Fluent Icons on Windows), rather than a pre-rendered
+        /// bitmap. Carries the glyph text. Vector glyphs stay crisp at any
+        /// size/scale factor and blend correctly at any opacity.
+        case symbolGlyph(String)
     }
 
     /// Creates an image view.
@@ -48,16 +53,22 @@ public struct Image: Sendable {
 
     /// Creates an image view from a system symbol name.
     ///
-    /// Symbol assets are looked up as `sfsymbols/<name>.imageset/<name>.png`
-    /// (optionally under an `Assets.xcassets` prefix) in the resource bundles
-    /// of every SwiftPM target linked into the running process. Symbols are
-    /// expected to be pre-rendered PNGs, e.g. exported from SF Symbols.
+    /// On platforms with a native icon font (Windows: Segoe Fluent Icons),
+    /// symbol names render as real font glyphs. Otherwise symbol assets are
+    /// looked up as `sfsymbols/<name>.imageset/<name>.png` (optionally under
+    /// an `Assets.xcassets` prefix) in the resource bundles of every SwiftPM
+    /// target linked into the running process — expected to be pre-rendered
+    /// PNGs, e.g. exported from SF Symbols.
     public init(systemName: String) {
-        if let url = Self.symbolURL(named: systemName) {
-            self.init(url, symbol: true)
-        } else {
-            self.init(URL(fileURLWithPath: ""))
-        }
+        #if os(Windows)
+            self.init(.symbolGlyph(FluentSymbolGlyphs.glyph(for: systemName)), resizable: false)
+        #else
+            if let url = Self.symbolURL(named: systemName) {
+                self.init(url, symbol: true)
+            } else {
+                self.init(URL(fileURLWithPath: ""))
+            }
+        #endif
     }
 
     private init(_ url: URL, symbol: Bool) {
@@ -120,10 +131,21 @@ public struct Image: Sendable {
         ) -> (bytes: [UInt8], width: Int, height: Int)? {
             let key = PixelsKey(url: url, useFileExtension: useFileExtension)
             lock.lock()
-            defer { lock.unlock() }
-            if let cached = pixels[key] { return cached }
+            if let cached = pixels[key] {
+                lock.unlock()
+                return cached
+            }
+            lock.unlock()
+            // Decode outside the lock: holding it across a slow decode makes
+            // the prefetch task block the main thread's unrelated lookups.
             let decoded = decode()
+            lock.lock()
+            if let raced = pixels[key] {
+                lock.unlock()
+                return raced
+            }
             pixels[key] = decoded
+            lock.unlock()
             return decoded
         }
     }
@@ -349,6 +371,33 @@ extension Image {
         }
         return decodePixels(from: url)
     }
+
+    /// Decodes every bundled image asset on a background thread so that
+    /// later `Image` layouts hit the pixel cache instead of decoding
+    /// synchronously mid-transition (which stalls page pushes noticeably on
+    /// debug builds where the decoder is unoptimized).
+    public static func prefetchBundledAssets() {
+        var files: [URL] = []
+        for bundle in resourceBundleDirectories() {
+            guard
+                let enumerator = FileManager.default.enumerator(
+                    at: bundle,
+                    includingPropertiesForKeys: nil
+                )
+            else { continue }
+            for case let url as URL in enumerator {
+                let ext = url.pathExtension.lowercased()
+                if ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "webp" {
+                    files.append(url)
+                }
+            }
+        }
+        Task.detached(priority: .utility) {
+            for file in files {
+                _ = decodePixels(from: file)
+            }
+        }
+    }
 }
 
 extension Image: View {
@@ -368,7 +417,28 @@ extension Image: TypeSafeView {
         snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
         environment: EnvironmentValues
     ) -> ImageChildren {
-        ImageChildren(backend: backend)
+        let children = ImageChildren(backend: backend)
+        if case .symbolGlyph = source {
+            children.symbolWidget = Self.makeSymbolWidget(backend: backend)
+        }
+        return children
+    }
+
+    /// Creates the icon-font widget for glyph-based symbols when the backend
+    /// supports ``BackendFeatures/SymbolViews``.
+    @MainActor
+    private static func makeSymbolWidget<Backend: BaseAppBackend>(
+        backend: Backend
+    ) -> AnyWidget? {
+        guard
+            let casted = backend as? any BaseAppBackend & BackendFeatures.SymbolViews
+        else { return nil }
+        func make<NewBackend: BaseAppBackend & BackendFeatures.SymbolViews>(
+            _ backend: NewBackend
+        ) -> AnyWidget {
+            AnyWidget(backend.createSymbolView())
+        }
+        return make(casted)
     }
 
     func asWidget<Backend: BaseAppBackend>(
@@ -409,6 +479,10 @@ extension Image: TypeSafeView {
                             bytes: decoded.bytes
                         )
                     }
+                case .symbolGlyph:
+                    // Glyphs render via the backend's icon font; there is no
+                    // bitmap to decode.
+                    image = nil
                 case .image(let sourceImage):
                     image = sourceImage
             }
@@ -421,9 +495,23 @@ extension Image: TypeSafeView {
         }
 
         let size: ViewSize
-        if let image {
+        if case .symbolGlyph = source, children.symbolWidget != nil {
+            // Icon-font glyphs size to the current font's em square, like
+            // SF Symbols sizing to the point size.
+            let fontSize = environment.font
+                .resolve(in: environment.fontResolutionContext).pointSize
+            let idealSize = ViewSize(
+                fontSize.rounded(.awayFromZero),
+                fontSize.rounded(.awayFromZero)
+            )
+            if isResizable {
+                size = proposedSize.replacingUnspecifiedDimensions(by: idealSize)
+            } else {
+                size = idealSize
+            }
+        } else if let image {
             var idealSize = ViewSize(Double(image.width), Double(image.height))
-            if case .symbol(let symURL) = source {
+            if case .symbol = source {
                 // Symbol images behave like SF Symbols: they hug the current
                 // font size (scaled by aspect ratio) instead of their pixel
                 // size, and only expand to fill a proposal when explicitly
@@ -458,6 +546,30 @@ extension Image: TypeSafeView {
         let size = layout.size.vector
         let hasResized = children.cachedImageDisplaySize != size
         children.cachedImageDisplaySize = size
+
+        if case .symbolGlyph(let glyph) = source, let symbolWidget = children.symbolWidget {
+            // Native icon-font path: no pixels involved — the backend draws
+            // the glyph at the laid-out em size with the environment's
+            // foreground color.
+            if let casted = backend as? any BaseAppBackend & BackendFeatures.SymbolViews {
+                func update<NewBackend: BaseAppBackend & BackendFeatures.SymbolViews>(
+                    _ backend: NewBackend
+                ) {
+                    backend.updateSymbolView(
+                        symbolWidget.into(),
+                        glyph: glyph,
+                        fontSize: Double(size.y),
+                        environment: environment
+                    )
+                }
+                update(casted)
+            }
+            setDisplayedWidget(symbolWidget, children: children, backend: backend)
+            backend.setSize(of: children.container.into(), to: size)
+            backend.setSize(of: symbolWidget.into(), to: size)
+            return
+        }
+
         if children.imageChanged
             || hasResized
             || (backend.requiresImageUpdateOnScaleFactorChange
@@ -474,26 +586,34 @@ extension Image: TypeSafeView {
                     dataHasChanged: children.imageChanged,
                     environment: environment
                 )
-                if children.isContainerEmpty {
-                    backend.insert(
-                        children.imageWidget.into(),
-                        into: children.container.into(),
-                        at: 0
-                    )
-                    backend.setPosition(ofChildAt: 0, in: children.container.into(), to: .zero)
-                }
-                children.isContainerEmpty = false
-            } else {
-                if !children.isContainerEmpty {
-                    backend.removeAllChildren(of: children.container.into())
-                }
-                children.isContainerEmpty = true
             }
             children.imageChanged = false
             children.lastScaleFactor = environment.windowScaleFactor
         }
+        setDisplayedWidget(
+            children.cachedImage == nil ? nil : children.imageWidget,
+            children: children,
+            backend: backend
+        )
         backend.setSize(of: children.container.into(), to: size)
         backend.setSize(of: children.imageWidget.into(), to: size)
+    }
+
+    /// Swaps the widget hosted inside the image's container, inserting the
+    /// given widget only when it differs from what's currently displayed.
+    @MainActor
+    private func setDisplayedWidget<Backend: BaseAppBackend>(
+        _ widget: AnyWidget?,
+        children: ImageChildren,
+        backend: Backend
+    ) {
+        if children.insertedWidget === widget { return }
+        backend.removeAllChildren(of: children.container.into())
+        if let widget {
+            backend.insert(widget.into(), into: children.container.into(), at: 0)
+            backend.setPosition(ofChildAt: 0, in: children.container.into(), to: .zero)
+        }
+        children.insertedWidget = widget
     }
 }
 
@@ -505,8 +625,13 @@ extension Image: TypeSafeView {
     var cachedImageDisplaySize: SIMD2<Int> = .zero
     var container: AnyWidget
     public var imageWidget: AnyWidget
+    /// The icon-font widget used when the image source is
+    /// ``Image/Source/symbolGlyph`` and the backend supports
+    /// ``BackendFeatures/SymbolViews``.
+    var symbolWidget: AnyWidget?
+    /// The widget currently hosted inside ``container``.
+    var insertedWidget: AnyWidget?
     var imageChanged = false
-    var isContainerEmpty = true
     var lastScaleFactor: Double = 1
 
     init<Backend: BaseAppBackend>(backend: Backend) {
@@ -517,3 +642,149 @@ extension Image: TypeSafeView {
     public var widgets: [AnyWidget] = []
     public var erasedNodes: [ErasedViewGraphNode] = []
 }
+
+#if os(Windows)
+    /// Maps SF Symbol names to Segoe Fluent Icons codepoints. The font itself
+    /// chains to Segoe MDL2 Assets on Windows versions lacking a glyph.
+    /// SF Symbols with no Fluent counterpart resolve to the closest single
+    /// glyph. Unknown names are a hard failure — a missing mapping must be
+    /// added rather than silently rendering an unrelated glyph.
+    enum FluentSymbolGlyphs {
+        static func glyph(for name: String) -> String {
+            guard let codepoint = codepoints[name],
+                let scalar = Unicode.Scalar(UInt32(codepoint))
+            else {
+                preconditionFailure(
+                    "unmapped SF Symbol name for Segoe Fluent Icons: \(name)")
+            }
+            return String(scalar)
+        }
+
+        private static let codepoints: [String: UInt16] = [
+            "app.badge": 0xECAA, // AppIconDefault
+            "arrow.2.squarepath": 0xE895, // Sync
+            "arrow.branch": 0xEF90, // Flow
+            "arrow.clockwise": 0xE72C, // Refresh
+            "arrow.clockwise.circle": 0xE895, // Sync
+            "arrow.down.circle": 0xE896, // Download
+            "arrow.down.to.line": 0xE896, // Download
+            "arrow.left.arrow.right": 0xE880, // StatusDataTransfer
+            "arrow.triangle.2.circlepath": 0xE895, // Sync
+            "arrow.triangle.branch": 0xEF90, // Flow
+            "arrow.trianglehead.pull": 0xEBD3, // CloudDownload
+            "arrow.up.document": 0xE898, // Upload
+            "arrow.up.forward.app": 0xE72D, // Share
+            "arrow.up.to.line": 0xE898, // Upload
+            "arrow.uturn.backward": 0xE7A7, // Undo
+            "arrow.uturn.left": 0xE7A7, // Undo
+            "brain.head.profile": 0xEA80, // Lightbulb
+            "bubble.fill": 0xE8BD, // Message
+            "bubble.left.and.bubble.right": 0xE8F2, // ChatBubbles
+            "bubble.left.and.bubble.right.fill": 0xE8F2, // ChatBubbles
+            "character.magnify": 0xE71E, // Zoom
+            "checklist": 0xE9D5, // CheckList
+            "checkmark": 0xE73E, // CheckMark
+            "checkmark.circle": 0xF13E, // StatusCircleCheckmark
+            "checkmark.circle.fill": 0xEC61, // CompletedSolid
+            "checkmark.seal.fill": 0xEB95, // Certificate
+            "checkmark.square.fill": 0xE73A, // CheckboxComposite
+            "chevron.backward": 0xE76B, // ChevronLeft
+            "chevron.down": 0xE70D, // ChevronDown
+            "chevron.forward": 0xE76C, // ChevronRight
+            "chevron.left": 0xE76B, // ChevronLeft
+            "chevron.left.forwardslash.chevron.right": 0xE943, // Code
+            "chevron.right": 0xE76C, // ChevronRight
+            "chevron.up": 0xE70E, // ChevronUp
+            "circle": 0xEA3A, // CircleRing
+            "clock.arrow.trianglehead.2.counterclockwise.rotate.90": 0xE81C, // History
+            "cloud": 0xE753, // Cloud
+            "curlybraces": 0xE943, // Code
+            "curlybraces.square": 0xE943, // Code
+            "cylinder.split.1x2": 0xE965, // MediaStorageTower
+            "doc": 0xE8A5, // Document
+            "doc.badge.arrow.up": 0xEDE1, // Export
+            "doc.badge.clock": 0xE81C, // History
+            "doc.badge.plus": 0xECC8, // AddTo
+            "doc.richtext": 0xE7C3, // Page
+            "doc.richtext.fill": 0xE729, // PageSolid
+            "doc.text": 0xE7C3, // Page
+            "doc.text.magnifyingglass": 0xE721, // Search
+            "doc.zipper": 0xE96A, // StorageTape
+            "document.on.document": 0xE8C8, // Copy
+            "dot.scope": 0xF272, // Bullseye
+            "ellipsis": 0xE712, // More
+            "exclamationmark.triangle.fill": 0xE7BA, // Warning
+            "eye": 0xE7B3, // RedEye
+            "eye.slash": 0xED1A, // Hide
+            "eye.square": 0xE8FF, // Preview
+            "film": 0xE8B2, // Movies
+            "finder": 0xE721, // Search
+            "folder": 0xE8B7, // Folder
+            "folder.badge.plus": 0xE8F4, // NewFolder
+            "folder.badge.questionmark": 0xF89A, // FolderSelect
+            "folder.fill": 0xE8D5, // FolderFill
+            "function": 0xE8EF, // Calculator
+            "gear": 0xE713, // Settings
+            "hammer.fill": 0xEC7A, // DeveloperTools
+            "hand.raised": 0xF271, // PointerHand
+            "hand.raised.slash": 0xF271, // PointerHand
+            "hand.tap": 0xE7C9, // TouchPointer
+            "icloud.and.arrow.down": 0xEBD3, // CloudDownload
+            "icloud.and.arrow.up": 0xE898, // Upload
+            "info.circle": 0xE946, // Info
+            "list.bullet.clipboard": 0xF0E3, // ClipboardList
+            "list.bullet.rectangle": 0xE8FD, // BulletedList
+            "magnifyingglass": 0xE721, // Search
+            "mic": 0xE720, // Microphone
+            "mic.fill": 0xF8B1, // MicrophoneSolidBold
+            "mic.slash": 0xEC54, // MicOff
+            "minus": 0xE738, // Remove
+            "minus.circle": 0xF140, // StatusCircleBlock
+            "paintpalette.fill": 0xE790, // Color
+            "paperclip": 0xE723, // Attach
+            "paperplane": 0xE724, // Send
+            "pause": 0xE769, // Pause
+            "pause.fill": 0xE769, // Pause
+            "pencil": 0xE70F, // Edit
+            "pencil.line": 0xE70F, // Edit
+            "person.2.wave.2.fill": 0xE716, // People
+            "person.badge.clock": 0xE8CF, // ContactPresence
+            "person.badge.key": 0xE72E, // Lock
+            "person.badge.plus": 0xE8FA, // AddFriend
+            "person.fill.questionmark": 0xE779, // ContactInfo
+            "photo": 0xE91B, // Photo
+            "photo.on.rectangle.angled": 0xE7AA, // PhotoCollection
+            "play": 0xE768, // Play
+            "play.fill": 0xE768, // Play
+            "play.rectangle": 0xE786, // Slideshow
+            "play.rectangle.on.rectangle": 0xE786, // Slideshow
+            "plus": 0xE710, // Add
+            "plus.message": 0xE8BD, // Message
+            "pointer.arrow.ipad": 0xE7C9, // TouchPointer
+            "questionmark": 0xE897, // Help
+            "rectangle.on.rectangle": 0xE73F, // BackToWindow
+            "rectangle.portrait.and.arrow.right": 0xE89B, // LeaveChat
+            "return": 0xE751, // ReturnKey
+            "safari": 0xE774, // Globe
+            "seal": 0xEB95, // Certificate
+            "server.rack": 0xE965, // MediaStorageTower
+            "sidebar.left": 0xE90C, // DockLeft
+            "sidebar.right": 0xE90D, // DockRight
+            "sparkles.2": 0xE735, // FavoriteStarFill
+            "square": 0xE739, // Checkbox
+            "square.and.arrow.down": 0xE896, // Download
+            "stop.circle": 0xF2D9, // CirclePause
+            "swift": 0xE943, // Code
+            "tag": 0xE8EC, // Tag
+            "terminal": 0xE756, // CommandPrompt
+            "terminal.fill": 0xE756, // CommandPrompt
+            "text.bubble.badge.clock.fill": 0xE8BD, // Message
+            "textformat": 0xE8D2, // Font
+            "timer": 0xE916, // Stopwatch
+            "trash": 0xE74D, // Delete
+            "waveform": 0xE8D6, // Audio
+            "xmark": 0xE711, // Cancel
+            "xmark.circle.fill": 0xEB90, // StatusErrorFull
+        ]
+    }
+#endif

@@ -54,4 +54,32 @@ extension BackendFeatures {
             environment: EnvironmentValues
         )
     }
+
+    /// Optional backend feature for rendering system symbols as native font
+    /// glyphs (e.g. WinUI's `FontIcon` equivalent: a `TextBlock` set to the
+    /// platform's icon font) instead of pre-rendered bitmaps.
+    ///
+    /// Used by ``Image`` when its source resolves to ``Image/Source/symbolGlyph``.
+    /// Vector glyphs stay sharp at any size/scale factor and respect
+    /// translucency, which bitmap fallbacks cannot guarantee.
+    @MainActor
+    public protocol SymbolViews: Core {
+        /// Creates a widget that displays a single icon-font glyph.
+        func createSymbolView() -> Widget
+
+        /// Updates a symbol view's glyph, size and environment-driven styling
+        /// (foreground color, enabled state).
+        ///
+        /// - Parameters:
+        ///   - symbolView: The widget returned by ``createSymbolView()``.
+        ///   - glyph: The glyph text (usually a single private-use codepoint).
+        ///   - fontSize: The glyph's em size in DIPs.
+        ///   - environment: The current environment.
+        func updateSymbolView(
+            _ symbolView: Widget,
+            glyph: String,
+            fontSize: Double,
+            environment: EnvironmentValues
+        )
+    }
 }

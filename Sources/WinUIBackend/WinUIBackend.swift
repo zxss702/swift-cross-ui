@@ -159,6 +159,8 @@ public final class WinUIBackend:
         var switchClickActions: [ObjectIdentifier: (Bool) -> Void] = [:]
         var sliderChangeActions: [ObjectIdentifier: (Double) -> Void] = [:]
         var webViewNavigationStartingHandlers: [ObjectIdentifier: EventCleanup] = [:]
+        var webViewNavigationCompletedHandlers: [ObjectIdentifier: EventCleanup] = [:]
+        var webViewCoreInitializedHandlers: [ObjectIdentifier: EventCleanup] = [:]
         var applicationMenu: ([ResolvedMenu.Submenu], EnvironmentValues)?
         var textFieldChangeActions: [ObjectIdentifier: (String) -> Void] = [:]
         var textFieldSubmitActions: [ObjectIdentifier: () -> Void] = [:]
@@ -437,6 +439,10 @@ public final class WinUIBackend:
 
         (window.appWindow.presenter as? OverlappedPresenter)?.isMinimizable = minimizable
         (window.appWindow.presenter as? OverlappedPresenter)?.isResizable = resizable
+        // A non-resizable window must not be maximizable either — otherwise
+        // the maximize caption button (and double-click on the title bar)
+        // would still blow it up to fullscreen.
+        (window.appWindow.presenter as? OverlappedPresenter)?.isMaximizable = resizable
     }
 
     public func setChild(ofWindow window: Window, to widget: Widget) {
@@ -513,11 +519,15 @@ public final class WinUIBackend:
     }
 
     public func activate(window: Window) {
+        FileHandle.standardError.write(
+            "[T \(Date().timeIntervalSince1970)] activate enter\n".data(using: .utf8)!)
         do {
             try window.activate()
         } catch {
             logger.warning("Failed to activate window: \(error)")
         }
+        FileHandle.standardError.write(
+            "[T \(Date().timeIntervalSince1970)] activate exit\n".data(using: .utf8)!)
     }
 
     public func close(window: Window) {
@@ -727,7 +737,8 @@ public final class WinUIBackend:
         // TODO: Notify when window scale factor changes
 
         // NB: This event fires when the window is activated _or_ deactivated.
-        window.activated.addHandler { _, _ in
+        window.activated.addHandler { _, args in
+            Self.hoverLog("windowActivated state=\(String(describing: args?.windowActivationState))")
             if let rootHandler = self.rootEnvironmentChangeHandler {
                 // Defer the refresh to the next dispatcher turn: `activated`
                 // fires synchronously inside `activate()` (i.e. mid-window-
@@ -783,11 +794,17 @@ public final class WinUIBackend:
 
     public func removeAllChildren(of container: Widget) {
         let container = container as! WinUI.Canvas
+        if windows.contains(where: { $0.chromeContainer === container }) {
+            Self.hoverLog("chromeRemoveAll")
+        }
         container.children.clear()
     }
 
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         let container = container as! WinUI.Canvas
+        if windows.contains(where: { $0.chromeContainer === container }) {
+            Self.hoverLog("chromeInsert idx=\(index)")
+        }
         container.children.insertAt(UInt32(index), child)
     }
 
@@ -797,6 +814,9 @@ public final class WinUIBackend:
         let container = container as! WinUI.Canvas
         let largerIndex = UInt32(max(firstIndex, secondIndex))
         let smallerIndex = UInt32(min(firstIndex, secondIndex))
+        if windows.contains(where: { $0.chromeContainer === container }) {
+            Self.hoverLog("chromeSwap \(smallerIndex)<->\(largerIndex)")
+        }
         let element1 = container.children[Int(smallerIndex)]
         let element2 = container.children[Int(largerIndex)]
         container.children.removeAt(largerIndex)
@@ -807,6 +827,9 @@ public final class WinUIBackend:
 
     public func remove(childAt index: Int, from container: Widget) {
         let container = container as! WinUI.Canvas
+        if windows.contains(where: { $0.chromeContainer === container }) {
+            Self.hoverLog("chromeRemove idx=\(index)")
+        }
         container.children.removeAt(UInt32(index))
     }
 
@@ -1198,10 +1221,20 @@ public final class WinUIBackend:
     ) {
         let button = button as! WinUI.Button
 
-        let block = createTextView() as! WinUI.TextBlock
-        block.text = label
-        button.content = block
-        environment.apply(to: block)
+        // Reassigning `content` swaps the visual child, resetting the
+        // button's PointerOver state mid-hover — reuse the existing
+        // TextBlock when possible so hover stays stable across commits.
+        if let block = button.content as? WinUI.TextBlock {
+            if block.text != label {
+                block.text = label
+            }
+            environment.apply(to: block)
+        } else {
+            let block = createTextView() as! WinUI.TextBlock
+            block.text = label
+            environment.apply(to: block)
+            button.content = block
+        }
 
         environment.apply(to: button)
         internalState.buttonClickActions[ObjectIdentifier(button)] = action
@@ -1232,13 +1265,22 @@ public final class WinUIBackend:
     ) {
         let button = button as! WinUI.Button
 
-        let block = createTextView() as! WinUI.TextBlock
-        block.text = label
-        button.content = block
-        environment.apply(to: block)
+        if let block = button.content as? WinUI.TextBlock {
+            if block.text != label {
+                block.text = label
+            }
+            environment.apply(to: block)
+        } else {
+            let block = createTextView() as! WinUI.TextBlock
+            block.text = label
+            environment.apply(to: block)
+            button.content = block
+        }
 
         environment.apply(to: button)
-        button.flyout = menu
+        if button.flyout !== menu {
+            button.flyout = menu
+        }
     }
 
     public func setButtonMenu(
@@ -2083,6 +2125,12 @@ public final class WinUIBackend:
             guard let tapGestureTarget else { return }
             tapGestureTarget.clickHandler?()
         }
+        tapGestureTarget.pointerEntered.addHandler { _, _ in
+            Self.hoverLog("tapTarget Entered")
+        }
+        tapGestureTarget.pointerExited.addHandler { _, _ in
+            Self.hoverLog("tapTarget Exited")
+        }
         return tapGestureTarget
     }
 
@@ -2541,21 +2589,39 @@ extension EnvironmentValues {
     @MainActor
     func apply(to control: WinUI.Control) {
         let resolvedFont = resolvedFont
-        control.fontSize = resolvedFont.pointSize
-        control.fontWeight.weight = resolvedFont.winUIFontWeight
-        control.foreground = winUIForegroundBrush
-        control.isEnabled = isEnabled
-        if resolvedFont.isItalic {
+        // Guard every write: this runs per control per layout pass and a new
+        // brush instance is never equal to the old one, so unconditional
+        // writes fire PropertyChanged (and invalidate PointerOver visuals)
+        // even when nothing changed.
+        if control.fontSize != resolvedFont.pointSize {
+            control.fontSize = resolvedFont.pointSize
+        }
+        if control.fontWeight.weight != resolvedFont.winUIFontWeight {
+            control.fontWeight.weight = resolvedFont.winUIFontWeight
+        }
+        let foregroundColor = suggestedForegroundColor.resolve(in: self).uwpColor
+        if let brush = control.foreground as? SolidColorBrush, brush.color == foregroundColor {
+        } else {
+            control.foreground = winUIForegroundBrush
+        }
+        if control.isEnabled != isEnabled {
+            control.isEnabled = isEnabled
+        }
+        if resolvedFont.isItalic, control.fontStyle != .italic {
             control.fontStyle = .italic
         }
-        if case .named(let family) = resolvedFont.identifier.kind {
+        if case .named(let family) = resolvedFont.identifier.kind,
+            control.fontFamily?.source != family
+        {
             control.fontFamily = WinUI.FontFamily(family)
         }
-        switch colorScheme {
-            case .light:
-                control.requestedTheme = .light
-            case .dark:
-                control.requestedTheme = .dark
+        let theme: WinUI.ElementTheme =
+            switch colorScheme {
+                case .light: .light
+                case .dark: .dark
+            }
+        if control.requestedTheme != theme {
+            control.requestedTheme = theme
         }
     }
 
@@ -2805,6 +2871,8 @@ public class CustomWindow: WinUI.Window {
 
         // NB: This event fires when the window is activated _or_ deactivated.
         self.activated.addHandler { [weak self] _, args in
+            FileHandle.standardError.write(
+                "[T \(Date().timeIntervalSince1970)] activated event state=\(String(describing: args?.windowActivationState))\n".data(using: .utf8)!)
             switch args?.windowActivationState {
                 case .codeActivated, .pointerActivated: self?.isActive = true
                 case .deactivated: self?.isActive = false
@@ -2851,7 +2919,11 @@ public class CustomWindow: WinUI.Window {
 
     public func setChild(_ child: WinUIBackend.Widget) {
         self.child = child
-        grid.children.append(child)
+        // Insert content *before* the chrome container so the chrome strip
+        // stays topmost in z-order — a content visual that spills above its
+        // row (Grid does not clip to rows) would otherwise paint over the
+        // strip's controls and swallow their hover feedback.
+        grid.children.insertAt(0, child)
         WinUI.Grid.setRow(child, 1)
         WinUI.Grid.setColumn(child, 0)
     }

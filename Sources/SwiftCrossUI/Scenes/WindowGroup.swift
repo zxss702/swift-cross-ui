@@ -163,6 +163,9 @@ public final class WindowGroupNode<Content: View>: SceneGraphNode {
         if let valueType = scene.valueType, let contentForValue = scene.contentForValue {
             environment.openWindowFunctionsByValueType.value[ObjectIdentifier(valueType)] = {
                 [weak self] value in
+                if ProcessInfo.processInfo.environment["SY_PROBE"] != nil {
+                    FileHandle.standardError.write("[PROBE] value-open closure entered self=\(self != nil)\n".data(using: .utf8)!)
+                }
                 guard let self else { return }
 
                 var scene = scene
