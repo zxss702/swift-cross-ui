@@ -86,6 +86,10 @@ public struct NavigationLink: View {
     private func pushDestination() {
         guard let destination else { return }
         let id = destinations.register { destination() }
-        environmentPath?.wrappedValue.append(NavigationViewLinkEntry(id: id))
+        environmentPath?.wrappedValue.append(
+            NavigationViewLinkEntry(id: id) {
+                destinations.unregister(id)
+            }
+        )
     }
 }

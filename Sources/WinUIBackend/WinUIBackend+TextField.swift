@@ -104,13 +104,58 @@ extension WinUIBackend {
     /// as bare text on the window's background, like on macOS.
     func applyTextFieldStyle(of control: WinUI.Control, style: SwiftCrossUI.TextFieldStyle) {
         guard style == .plain else { return }
+        applyPlainTextControlChrome(to: control)
+    }
+
+    /// Strips every visual that distinguishes a WinUI text control from plain
+    /// text — resting border/background as well as the pointer-over and
+    /// focused visual states (WinUI's TextBox template swaps in
+    /// `TextControl*Focused` theme resources on focus, so overriding just the
+    /// `borderThickness`/`background` properties leaves a visible chrome the
+    /// moment the control gains focus).
+    func applyPlainTextControlChrome(to control: WinUI.Control) {
         control.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
         let transparent = UWP.Color(a: 0, r: 0, g: 0, b: 0)
-        let background = WinUI.SolidColorBrush()
-        background.color = transparent
-        control.background = background
+        let brush = WinUI.SolidColorBrush()
+        brush.color = transparent
+        control.background = brush
+
+        // Visual-state theme resources used by the TextBox/PasswordBox
+        // template. Overriding them at the control level wins over the theme
+        // dictionaries in resource lookup order. Resource values must be
+        // objects XAML can repackage — a Swift `Thickness` inserted directly
+        // boxes to an unidentifiable IInspectable and crashes the template
+        // binding, so a genuine XAML-boxed thickness is extracted from a
+        // throwaway control instead.
+        for key in [
+            "TextControlBackground",
+            "TextControlBackgroundPointerOver",
+            "TextControlBackgroundFocused",
+            "TextControlBackgroundDisabled",
+            "TextControlBorderBrush",
+            "TextControlBorderBrushPointerOver",
+            "TextControlBorderBrushFocused",
+            "TextControlBorderBrushDisabled",
+        ] {
+            _ = control.resources.insert(key, brush)
+        }
+        for key in [
+            "TextControlBorderThemeThickness",
+            "TextControlBorderThemeThicknessFocused",
+        ] {
+            _ = control.resources.insert(key, boxedZeroThickness)
+        }
     }
 }
+
+/// A zero `Thickness` boxed by XAML itself, suitable for insertion into a
+/// `ResourceDictionary` — Swift-side struct boxing produces inspectables
+/// that the template engine can't repackage.
+private let boxedZeroThickness: Any? = {
+    let box = WinUI.Border()
+    box.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
+    return try? box.getValue(WinUI.Border.borderThicknessProperty)
+}()
 
 // MARK: TextBoxProtocol
 

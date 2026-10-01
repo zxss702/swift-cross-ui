@@ -9,14 +9,75 @@ struct ScaleEffectView<Content: View>: View {
     }
 }
 
-/// A view that stores a rotation transform for its content.
-struct RotationEffectView<Content: View>: View {
+/// Implemented by backend widget types that support rotating their rendered
+/// output around a normalized anchor point (0...1 within the widget's bounds).
+/// Widgets that don't conform simply render unrotated — the modifier degrades
+/// gracefully instead of requiring every backend to opt in.
+/// Only ever invoked on the main thread; deliberately *not* `@MainActor` —
+/// conforming a backend's widget class to a global-actor protocol would
+/// propagate that isolation onto the entire widget class hierarchy.
+public protocol SCUIRotatable {
+    func setRotation(degrees: Double, anchor: UnitPoint)
+}
+
+/// A view that rotates its content around an anchor point.
+struct RotationEffectView<Content: View>: View, TypeSafeView {
     var content: Content
     var angle: Angle
     var anchor: UnitPoint
 
-    var body: some View {
-        content
+    var body: TupleView1<Content> { TupleView1(content) }
+
+    typealias Children = TupleView1<Content>.Children
+
+    func children<Backend: BaseAppBackend>(
+        backend: Backend,
+        snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
+        environment: EnvironmentValues
+    ) -> Children {
+        body.children(
+            backend: backend,
+            snapshots: snapshots,
+            environment: environment
+        )
+    }
+
+    func asWidget<Backend: BaseAppBackend>(
+        _ children: Children,
+        backend: Backend
+    ) -> Backend.Widget {
+        let container = backend.createContainer()
+        backend.insert(children.child0.widget.into(), into: container, at: 0)
+        return container
+    }
+
+    func computeLayout<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        children: Children,
+        proposedSize: ProposedViewSize,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) -> ViewLayoutResult {
+        children.child0.computeLayout(
+            with: body.view0,
+            proposedSize: proposedSize,
+            environment: environment
+        )
+    }
+
+    func commit<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        children: Children,
+        layout: ViewLayoutResult,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        let size = children.child0.commit().size
+        backend.setSize(of: widget, to: size.vector)
+        (widget as? any SCUIRotatable)?.setRotation(
+            degrees: angle.degrees,
+            anchor: anchor
+        )
     }
 }
 

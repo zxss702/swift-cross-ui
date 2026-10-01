@@ -447,15 +447,22 @@ extension View {
         }
     }
 
-    /// Presents content in a popover when `isPresented` is true. Uses sheet
-    /// presentation plumbing until popover-specific chrome lands.
+    /// Presents content in a popover when `isPresented` is true. On backends
+    /// implementing ``BackendFeatures/Popovers`` the content is presented in
+    /// an anchored flyout; other backends fall back to sheet presentation.
     public func popover<Content: View>(
         isPresented: Binding<Bool>,
         attachmentAnchor: UnitPoint = .center,
         arrowEdge: Edge? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        sheet(isPresented: isPresented, content: content)
+        SheetModifier(
+            isPresented: isPresented,
+            body: TupleView1(self),
+            onDismiss: nil,
+            sheetContent: content,
+            popoverAnchor: (attachmentAnchor, arrowEdge)
+        )
     }
 
     /// Inserts a view at the given safe-area edge, reserving space for it.

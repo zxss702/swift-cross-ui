@@ -54,4 +54,35 @@ enum BackendHelpers {
             logger.warnOnce("\(Backend.self) doesn't support focus control/tracking.")
         }
     }
+
+    /// Applies ``EnvironmentValues/contextMenuItems`` to a widget. The
+    /// context menu is re-resolved and re-applied on each update; backends
+    /// are expected to avoid redundant work when items are unchanged.
+    static func applyContextMenu<Backend: BaseAppBackend>(
+        from environment: EnvironmentValues,
+        to widget: AnyWidget,
+        with backend: Backend
+    ) {
+        guard let menuBackend = backend as? any BackendFeatures.ContextMenus else {
+            if environment.contextMenuItems != nil {
+                logger.warnOnce("\(Backend.self) doesn't support context menus.")
+            }
+            return
+        }
+        applyContextMenu(from: environment, to: widget, with: menuBackend)
+    }
+
+    /// Re-binds ``BackendFeatures/ContextMenus``'s associated widget type so
+    /// that it can be used through a protocol existential.
+    private static func applyContextMenu<MenuBackend: BackendFeatures.ContextMenus>(
+        from environment: EnvironmentValues,
+        to widget: AnyWidget,
+        with backend: MenuBackend
+    ) {
+        backend.setContextMenu(
+            on: widget.into(),
+            items: environment.contextMenuItems.map { Menu.resolve(items: $0) },
+            environment: environment
+        )
+    }
 }

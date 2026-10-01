@@ -2,6 +2,15 @@
 /// ``NavigationLink/init(destination:label:)``).
 struct NavigationViewLinkEntry: Codable {
     var id: Int
+    /// Called when this entry is popped off a navigation path. Used by
+    /// `navigationDestination(item:)` to reset the item binding back to
+    /// `nil`, matching SwiftUI's two-way presentation semantics. Not
+    /// encoded; decoded entries can't carry a dismissal handler.
+    var onDismiss: (() -> Void)? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id
+    }
 }
 
 /// Shared navigation state used to implement destination-view navigation
@@ -25,6 +34,13 @@ public final class NavigationDestinations {
         nextViewDestinationId += 1
         viewDestinations[id] = view
         return id
+    }
+
+    /// Removes a previously registered view destination. Called when the
+    /// destination's path entry is popped so that stale destinations don't
+    /// accumulate.
+    func unregister(_ id: Int) {
+        viewDestinations[id] = nil
     }
 }
 
@@ -113,7 +129,12 @@ private struct _NavigationItemDestination<Content: View, Item, Destination: View
                 if isPresented, let value = item.wrappedValue {
                     let id = destinations.register { AnyView(destination(value)) }
                     pushedEntryId = id
-                    navigationPath?.wrappedValue.append(NavigationViewLinkEntry(id: id))
+                    navigationPath?.wrappedValue.append(
+                        NavigationViewLinkEntry(id: id) {
+                            item.wrappedValue = nil
+                            destinations.unregister(id)
+                        }
+                    )
                 } else if !isPresented, pushedEntryId != nil {
                     pushedEntryId = nil
                     navigationPath?.wrappedValue.removeLast()

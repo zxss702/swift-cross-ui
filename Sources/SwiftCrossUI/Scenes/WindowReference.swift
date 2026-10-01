@@ -356,6 +356,14 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
         cachedWindowSize = proposedWindowSize
 
         if let backend = backend as? any BackendFeatures.WindowBehaviors {
+            // `.contentSize` resizability applied to fixed-size content leaves
+            // no room to resize — the window must be non-resizable (and hence
+            // non-maximizable) rather than merely min/max-clamped, since
+            // maximizing ignores track-size limits.
+            let fixedContentSize =
+                environment.windowResizability == .contentSize
+                && maximumWindowSize != nil
+                && maximumWindowSize?.vector == minimumWindowSize.vector
             func setBehaviors<NewBackend: BackendFeatures.WindowBehaviors>(backend: NewBackend) {
                 backend.setBehaviors(
                     ofWindow: window as! NewBackend.Window,
@@ -363,8 +371,10 @@ final class WindowReference<SceneType: WindowingScene>: ModelObserver {
                         .isEnabled ?? true,
                     minimizable: finalContentResult.preferences.preferredWindowMinimizeBehavior?
                         .isEnabled ?? true,
-                    resizable: finalContentResult.preferences.windowResizeBehavior?
-                        .isEnabled ?? true
+                    resizable: !fixedContentSize && (
+                        finalContentResult.preferences.windowResizeBehavior?
+                            .isEnabled ?? true
+                    )
                 )
             }
             setBehaviors(backend: backend)

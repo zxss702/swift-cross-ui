@@ -66,6 +66,12 @@ struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {
     var onDismiss: (() -> Void)?
     var sheetContent: () -> SheetContent
 
+    /// Non-nil when implementing ``View/popover(isPresented:attachmentAnchor:arrowEdge:content:)``:
+    /// the attachment anchor and popover arrow edge. On backends implementing
+    /// ``BackendFeatures/Popovers`` the content is presented in an anchored
+    /// flyout; other backends fall back to sheet presentation.
+    var popoverAnchor: (attachmentAnchor: UnitPoint, arrowEdge: Edge?)? = nil
+
     var sheet: Any?
 
     func children<Backend: BaseAppBackend>(
@@ -108,9 +114,8 @@ struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {
         )
     }
 
-    @CastBackend<BackendFeatures.Sheets>(backendGenericName: "NewBackend")
     func commit<Backend: BaseAppBackend>(
-        _: Backend.Widget,
+        _ widget: Backend.Widget,
         children: Children,
         layout: ViewLayoutResult,
         environment: EnvironmentValues,
@@ -118,6 +123,119 @@ struct SheetModifier<Content: View, SheetContent: View>: TypeSafeView {
     ) {
         _ = children.childNode.commit()
 
+        if popoverAnchor != nil,
+            let popoverBackend = backend as? any BaseAppBackend & BackendFeatures.Popovers
+        {
+            commitPopover(
+                widget,
+                children: children,
+                environment: environment,
+                backend: popoverBackend
+            )
+            return
+        }
+
+        guard
+            let sheetBackend = backend as? any BaseAppBackend & BackendFeatures.Sheets
+        else {
+            fatalError("'\(Backend.self)' does not implement 'BackendFeatures.Sheets'")
+        }
+        commitSheet(
+            widget,
+            children: children,
+            environment: environment,
+            backend: sheetBackend
+        )
+    }
+
+    private func commitPopover<NewBackend: BaseAppBackend & BackendFeatures.Popovers>(
+        _ widget: Any,
+        children: Children,
+        environment: EnvironmentValues,
+        backend: NewBackend
+    ) {
+        let anchor = widget as! NewBackend.Widget
+
+        if isPresented.wrappedValue {
+            let needsPresenting = children.popover == nil
+
+            let popover: NewBackend.Popover
+            if children.sheetContentNode == nil {
+                let popoverViewGraphNode = ViewGraphNode(
+                    for: sheetContent(),
+                    backend: backend,
+                    environment: environment
+                )
+                let popoverContentNode = AnyViewGraphNode(popoverViewGraphNode)
+                children.sheetContentNode = popoverContentNode
+
+                popover = backend.createPopover(
+                    content: popoverContentNode.widget.into()
+                )
+            } else {
+                guard
+                    let existingPopover = children.popover,
+                    let castedPopover = existingPopover as? NewBackend.Popover
+                else {
+                    logger.warning(
+                        """
+                        SheetModifier has a nil popover, even though the popover \
+                        has already been presented
+                        """
+                    )
+                    return
+                }
+                popover = castedPopover
+            }
+
+            let dismissAction = DismissAction(action: { [isPresented] in
+                isPresented.wrappedValue = false
+            })
+
+            let popoverEnvironment =
+                environment
+                    .with(\.dismiss, dismissAction)
+
+            _ = children.sheetContentNode!.computeLayout(
+                with: sheetContent(),
+                proposedSize: .unspecified,
+                environment: popoverEnvironment
+            )
+            _ = children.sheetContentNode!.commit()
+
+            backend.updatePopover(
+                popover,
+                content: children.sheetContentNode!.widget.into(),
+                environment: environment,
+                onDismiss: { [isPresented] in
+                    children.popover = nil
+                    children.sheetContentNode = nil
+                    isPresented.wrappedValue = false
+                }
+            )
+
+            if needsPresenting {
+                backend.presentPopover(
+                    popover,
+                    relativeTo: anchor,
+                    arrowEdge: popoverAnchor!.arrowEdge
+                )
+            }
+
+            children.popover = popover
+        } else if children.popover != nil {
+            backend.dismissPopover(children.popover as! NewBackend.Popover)
+            children.popover = nil
+            children.sheetContentNode = nil
+        }
+    }
+
+    private func commitSheet<NewBackend: BaseAppBackend & BackendFeatures.Sheets>(
+        _ widget: Any,
+        children: Children,
+        environment: EnvironmentValues,
+        backend: NewBackend
+    ) {
         if isPresented.wrappedValue {
             let needsPresenting = children.sheet == nil
 
@@ -237,6 +355,7 @@ class SheetModifierViewChildren<Child: View, SheetContent: View>: ViewGraphNodeC
     var childNode: AnyViewGraphNode<Child>
     var sheetContentNode: AnyViewGraphNode<SheetContent>?
     var sheet: Any?
+    var popover: Any?
     var window: Any?
     var parentSheet: Any?
 

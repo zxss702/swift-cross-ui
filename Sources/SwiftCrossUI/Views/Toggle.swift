@@ -58,10 +58,7 @@ public struct Toggle: View {
                 }
             case .button:
                 if let labelView {
-                    Button(
-                        action: { active.wrappedValue.toggle() },
-                        label: { labelView() }
-                    )
+                    ViewLabelledToggleButton(label: labelView, active: active)
                 } else {
                     ToggleButton(label, isOn: active)
                 }

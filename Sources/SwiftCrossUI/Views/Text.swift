@@ -244,10 +244,10 @@ extension Text: ElementaryView {
                 // proposal, and this works nicer with most backends than converting
                 // .infinity to a large integer (which is the alternative).
                 $0 == .infinity ? nil : $0
-            }.map(LayoutSystem.roundSize).map { max(1, $0) },
+            }.map { LayoutSystem.roundSize($0) }.map { max(1, $0) },
             proposedHeight: proposedSize.height.flatMap {
                 $0 == .infinity ? nil : $0
-            }.map(LayoutSystem.roundSize).map { max(1, $0) },
+            }.map { LayoutSystem.roundSize($0) }.map { max(1, $0) },
             environment: environment
         )
 

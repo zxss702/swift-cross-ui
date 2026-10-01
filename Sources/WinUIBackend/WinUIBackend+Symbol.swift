@@ -17,10 +17,12 @@ extension WinUIBackend: BackendFeatures.SymbolViews {
     public func createSymbolView() -> Widget {
         let block = WinUI.TextBlock()
         block.fontFamily = WinUI.FontFamily(Self.symbolFontSource)
-        // Segoe Fluent Icons ships a single regular weight; DirectWrite
-        // synthesizes the semibold stroke, matching SF Symbols' medium
-        // default weight on macOS.
-        block.fontWeight = UWP.FontWeights.semiBold
+        // Segoe Fluent Icons only ships a Regular weight — asking for a
+        // heavier weight makes DirectWrite *synthesize* it, which thickens
+        // vertical stems far more than horizontal strokes (visually
+        // "horizontally stretched" glyphs). The native weight keeps each
+        // glyph's designed stroke proportions.
+        block.fontWeight = UWP.FontWeights.normal
         block.horizontalTextAlignment = .center
         block.verticalAlignment = .center
         block.isTextSelectionEnabled = false

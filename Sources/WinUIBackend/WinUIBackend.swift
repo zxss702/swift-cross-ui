@@ -97,6 +97,8 @@ public final class WinUIBackend:
     BackendFeatures.AttachedMenus,
     BackendFeatures.Paths,
     BackendFeatures.Tooltips,
+    BackendFeatures.ViewLabelToggleButtons,
+    BackendFeatures.ContextMenus,
     BackendFeatures.Colors,
     BackendFeatures.DatePickers,
     BackendFeatures.Windowing,
@@ -164,6 +166,15 @@ public final class WinUIBackend:
         var applicationMenu: ([ResolvedMenu.Submenu], EnvironmentValues)?
         var textFieldChangeActions: [ObjectIdentifier: (String) -> Void] = [:]
         var textFieldSubmitActions: [ObjectIdentifier: () -> Void] = [:]
+        var popoverDismissActions: [ObjectIdentifier: () -> Void] = [:]
+
+        /// The context-menu flyout attached to each widget (keyed by widget
+        /// identity). Rebuilt in-place on each update so that the
+        /// `contextRequested` handler always reads the latest items.
+        var contextMenuFlyouts: [ObjectIdentifier: MenuFlyout] = [:]
+
+        /// Widgets that already have a `contextRequested` handler attached.
+        var contextMenuHooks: Set<ObjectIdentifier> = []
 
         /// Memoized results of `size(of:whenDisplayedIn:...)` text
         /// measurements. Text measurement requires a real XAML `measure` call,
@@ -248,6 +259,19 @@ public final class WinUIBackend:
                 // that transient gaps between `dismiss()` and `openWindow(...)`
                 // (or just having no windows open) don't quit the app.
                 application.dispatcherShutdownMode = .onExplicitShutdown
+
+                // Log unhandled XAML exceptions to stderr before the default
+                // FailFast terminates the process. This preserves diagnostics
+                // (e.g. "Invalid attribute value Unknown for property X") that
+                // would otherwise only be recoverable from crash dumps.
+                _ = application.unhandledException.addHandler { (_, e) in
+                    FileHandle.standardError.write(Data("UNHANDLED XAML EXCEPTION\n".utf8))
+                    if let e {
+                        FileHandle.standardError.write(
+                            Data("  hr=\(String(e.exception, radix: 16))\n  msg=\(e.message)\n".utf8)
+                        )
+                    }
+                }
 
                 // Toggle Switch has annoying default 'internal margins' (not Control
                 // margins that we can set directly) that we can luckily get rid of by
@@ -1307,6 +1331,51 @@ public final class WinUIBackend:
         }
     }
 
+    public func setContextMenu(
+        on widget: Widget,
+        items: ResolvedMenu?,
+        environment: EnvironmentValues
+    ) {
+        let id = ObjectIdentifier(widget)
+
+        guard let items else {
+            internalState.contextMenuFlyouts.removeValue(forKey: id)
+            if widget.contextFlyout != nil {
+                widget.contextFlyout = nil
+            }
+            return
+        }
+
+        let flyout = internalState.contextMenuFlyouts[id] ?? MenuFlyout()
+        internalState.contextMenuFlyouts[id] = flyout
+        flyout.items.clear()
+        for item in items.items {
+            flyout.items.append(renderMenuItem(item, environment: environment))
+        }
+
+        // `UIElement.contextFlyout` doesn't reliably auto-show in XAML
+        // islands (the `contextRequested` gesture doesn't reach us), so show
+        // the flyout from `rightTapped` instead. The event bubbles from the
+        // deepest element up, so the innermost context-menu'd view wins; its
+        // handler marks the event handled which prevents ancestors from
+        // re-showing their own menus.
+        if internalState.contextMenuHooks.insert(id).inserted {
+            widget.rightTapped.addHandler { [weak internalState, weak widget] _, args in
+                guard
+                    let internalState,
+                    let widget,
+                    let menu = internalState.contextMenuFlyouts[ObjectIdentifier(widget)],
+                    let args,
+                    !args.handled,
+                    let position = try? args.getPosition(widget)
+                else { return }
+
+                try? menu.showAt(widget, position)
+                args.handled = true
+            }
+        }
+    }
+
     public func updateButton(
         _ button: Widget,
         label: String,
@@ -1670,17 +1739,9 @@ public final class WinUIBackend:
         // Remove padding
         textEditor.padding = Thickness(left: 0, top: 0, right: 0, bottom: 0)
 
-        // Remove border and background color
-        textEditor.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
-        let brush = SolidColorBrush()
-        brush.color = UWP.Color(a: 0, r: 0, g: 0, b: 0)
-        textEditor.background = brush
-
-        // Remove hover and focus effects
-        _ = textEditor.resources.insert("TextControlBackgroundPointerOver", brush)
-        _ = textEditor.resources.insert("TextControlBackgroundFocused", brush)
-        _ = textEditor.resources.insert("TextControlBorderBrushFocused", brush)
-        _ = textEditor.resources.insert("TextControlBorderBrushPointerOver", brush)
+        // Remove border, background and the focused/hover visual states so
+        // the editor reads as bare text (consistent with .plain TextFields).
+        applyPlainTextControlChrome(to: textEditor)
 
         return textEditor
     }
@@ -1931,6 +1992,26 @@ public final class WinUIBackend:
     public func setState(ofToggle toggle: Widget, to state: Bool) {
         let toggle = toggle as! ToggleButton
         toggle.isChecked = state
+    }
+
+    public func createToggle(wrapping widget: Widget) -> Widget {
+        let toggle = ToggleButton()
+        toggle.content = widget
+        toggle.click.addHandler { [weak internalState] _, _ in
+            guard let internalState else { return }
+            internalState.toggleClickActions[ObjectIdentifier(toggle)]?(toggle.isChecked ?? false)
+        }
+        return toggle
+    }
+
+    public func updateToggle(
+        _ toggle: Widget,
+        environment: EnvironmentValues,
+        onChange: @escaping (Bool) -> Void
+    ) {
+        let toggle = toggle as! ToggleButton
+        environment.apply(to: toggle)
+        internalState.toggleClickActions[ObjectIdentifier(toggle)] = onChange
     }
 
     public func createSwitch() -> Widget {
@@ -2496,8 +2577,16 @@ public final class WinUIBackend:
         let winUiPath = container as! WinUI.Path
         let strokeStyle = overrideStrokeStyle ?? path.strokeStyle!
 
-        winUiPath.fill = WinUI.SolidColorBrush(fillColor.uwpColor)
-        winUiPath.stroke = WinUI.SolidColorBrush(strokeColor.uwpColor)
+        // XAML hit-tests a shape wherever its fill or stroke brush is
+        // non-null — even a fully transparent brush registers. Leave the
+        // brush null for unpainted channels so transparent overlays (e.g.
+        // stroke-only borders, clear fills) don't swallow pointer input that
+        // should reach controls underneath.
+        winUiPath.fill =
+            fillColor.opacity > 0 ? WinUI.SolidColorBrush(fillColor.uwpColor) : nil
+        winUiPath.stroke =
+            strokeColor.opacity > 0 && strokeStyle.width > 0
+            ? WinUI.SolidColorBrush(strokeColor.uwpColor) : nil
         winUiPath.strokeThickness = strokeStyle.width
 
         switch strokeStyle.cap {

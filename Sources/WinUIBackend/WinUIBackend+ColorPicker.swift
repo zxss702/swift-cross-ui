@@ -43,7 +43,7 @@ final class ColorButton: WinUI.Button {
     override init() {
         super.init()
 
-        self.click.addHandler { [unowned self] _, _ in
+        self.click.addHandler { @MainActor [unowned self] _, _ in
             if self.dialog != nil { return }
 
             let dialog = ColorDialog { [weak self] in self?.dialog = nil }

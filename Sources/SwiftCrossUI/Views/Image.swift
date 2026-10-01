@@ -1,6 +1,10 @@
 import Foundation
 import ImageFormats
 
+#if canImport(LibPNG)
+    import LibPNG
+#endif
+
 /// A view that displays an image.
 public struct Image: Sendable {
     /// Whether the image is resizable.
@@ -350,7 +354,14 @@ extension Image {
         }
         let bytes = Array(data)
         let image: ImageFormats.Image<RGBA>?
-        if useFileExtension {
+        let pngMagicBytes: [UInt8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+        let isPNG =
+            useFileExtension
+            ? url.pathExtension.lowercased() == "png"
+            : bytes.starts(with: pngMagicBytes)
+        if isPNG, let decoded = decodePNG(bytes) {
+            image = decoded
+        } else if useFileExtension {
             image = try? .load(from: bytes, usingFileExtension: url.pathExtension)
         } else {
             image = try? .load(from: bytes)
@@ -359,6 +370,43 @@ extension Image {
             return nil
         }
         return (image.bytes, image.width, image.height)
+    }
+
+    /// Decodes PNG data with libpng's simplified API. Mirrors
+    /// `ImageFormats.Image.loadPNG` but sets `PNG_IMAGE_FLAG_16BIT_sRGB`:
+    /// for 16-bit-per-component files libpng otherwise defaults to assuming
+    /// linear-light input (the simplified API ignores the transfer curves
+    /// declared by iCCP/cICP colour-profile chunks, e.g. Display-P3 exports),
+    /// then encodes the output as sRGB — visibly washing colours out.
+    /// Treating 16-bit input as sRGB-encoded preserves the stored values,
+    /// which is what platform image renderers (NSImage etc.) effectively show.
+    private static func decodePNG(_ bytes: [UInt8]) -> ImageFormats.Image<RGBA>? {
+        #if canImport(LibPNG)
+            var image = png_image()
+            memset(&image, 0, MemoryLayout<png_image>.size)
+            image.version = 1  // PNG_IMAGE_VERSION
+
+            guard png_image_begin_read_from_memory(&image, bytes, bytes.count) != 0 else {
+                return nil
+            }
+
+            image.format = 3  // PNG_FORMAT_RGBA
+            image.flags |= 0x04  // PNG_IMAGE_FLAG_16BIT_sRGB
+
+            var rgbaBytes = [UInt8](repeating: 0, count: Int(image.width * image.height * 4))
+            guard png_image_finish_read(&image, nil, &rgbaBytes, 0, nil) != 0 else {
+                png_image_free(&image)
+                return nil
+            }
+
+            return ImageFormats.Image<RGBA>(
+                width: Int(image.width),
+                height: Int(image.height),
+                bytes: rgbaBytes
+            )
+        #else
+            return try? ImageFormats.Image<RGBA>.loadPNG(from: bytes)
+        #endif
     }
 
     /// Decoded RGBA8 pixels of a named bundled asset, or `nil` if the asset
@@ -566,7 +614,20 @@ extension Image: TypeSafeView {
             }
             setDisplayedWidget(symbolWidget, children: children, backend: backend)
             backend.setSize(of: children.container.into(), to: size)
-            backend.setSize(of: symbolWidget.into(), to: size)
+            // Give the glyph widget its natural measured size rather than the
+            // em square: icon glyphs have ink that legitimately extends past
+            // the em box (wider strokes at heavier weights, optical overhang),
+            // and squeezing the widget into the em square clips those strokes.
+            // The container doesn't clip its children, so centring the
+            // naturally-sized glyph keeps it optically centred while letting
+            // the full ink show.
+            let naturalSize = backend.naturalSize(of: symbolWidget.into())
+            backend.setSize(of: symbolWidget.into(), to: naturalSize)
+            backend.setPosition(
+                ofChildAt: 0,
+                in: children.container.into(),
+                to: (size &- naturalSize) / 2
+            )
             return
         }
 

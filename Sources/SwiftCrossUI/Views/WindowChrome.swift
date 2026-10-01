@@ -181,6 +181,7 @@ struct WindowChromeBar: View {
                         .padding(.horizontal, 4)
                 }
                 .buttonStyle(.borderless)
+                .frame(height: stripHeight - 14)
             }
             if let title = chrome?.title {
                 title
@@ -198,12 +199,17 @@ struct WindowChromeBar: View {
 
     /// Renders toolbar items inline without ``ToolbarBar``'s own leading/
     /// trailing split and padding — the chrome row manages spacing itself.
+    /// Toolbar labels show their icon only (matching macOS toolbars), and
+    /// every item gets the same height so mixed Button/Menu/Toggle entries
+    /// don't produce a ragged strip.
     @ViewBuilder
     private func chromeItems(_ items: [ResolvedToolbarItem]) -> some View {
         ForEach(Array(items.enumerated()), id: \.offset) { item in
             switch item.element.kind {
             case .view(let view):
                 view
+                    .labelsHidden()
+                    .frame(height: stripHeight - 14)
             case .spacer(.fixed):
                 Spacer().frame(width: 16)
             case .spacer(.flexible):

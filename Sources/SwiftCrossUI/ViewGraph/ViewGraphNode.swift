@@ -356,6 +356,12 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
             )
         }
 
+        BackendHelpers.applyContextMenu(
+            from: parentEnvironment,
+            to: AnyWidget(widget),
+            with: backend
+        )
+
         if parentEnvironment.allowLayoutCaching {
             logger.warning(
                 "committing layout computed with caching enabled; results may be invalid",

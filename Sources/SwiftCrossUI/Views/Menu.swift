@@ -35,9 +35,12 @@ public struct Menu {
         @ViewBuilder content: () -> Content,
         @ViewBuilder label: () -> Label
     ) {
-        self.label = ""
-        self.items = content()._asMenuItems
         let labelView = label()
+        // Preserve the label's title text so that contexts which can't host a
+        // view label (such as a submenu in a context menu) still get a
+        // meaningful name.
+        self.label = (labelView as? SwiftCrossUI.Label<Text, Image>)?.title.string ?? ""
+        self.items = content()._asMenuItems
         self.labelContent = { AnyView(labelView) }
     }
 
@@ -140,9 +143,11 @@ extension Menu: TypeSafeView {
                 environment: childEnvironment
             )
             backend.updateButton(widget, environment: environment, action: {})
-            let size = SIMD2(
-                LayoutSystem.roundSize(childResult.size.width) + buttonPadding.x,
-                LayoutSystem.roundSize(childResult.size.height) + buttonPadding.y
+            // Keep the size as Double so an infinite probe result propagates as
+            // .infinity instead of clamping to Int32.max (see `Button.computeLayout`).
+            let size = ViewSize(
+                childResult.size.width + Double(buttonPadding.x),
+                childResult.size.height + Double(buttonPadding.y)
             )
             switch backend.menuImplementationStyle {
                 case .menuButton(let backend):
@@ -155,7 +160,7 @@ extension Menu: TypeSafeView {
                     break
             }
             return ViewLayoutResult
-                .leafView(size: ViewSize(size))
+                .leafView(size: size)
                 .with(\.isNeverFocusable, false)
         }
 

@@ -123,13 +123,16 @@ extension Button: TypeSafeView {
 
         // Buttons should always be set to label size + padding.
         // The backend representation of a button is expected not to have a minSize.
-        let size = SIMD2(
-            LayoutSystem.roundSize(childResult.size.width) + buttonPadding.x,
-            LayoutSystem.roundSize(childResult.size.height) + buttonPadding.y
+        // Keep the size as Double so an infinite probe result propagates as
+        // .infinity (rounding happens at the backend boundary in `ViewSize.vector`);
+        // turning it into Int32.max here would corrupt sibling space distribution.
+        let size = ViewSize(
+            childResult.size.width + Double(buttonPadding.x),
+            childResult.size.height + Double(buttonPadding.y)
         )
 
         return ViewLayoutResult
-            .leafView(size: ViewSize(size))
+            .leafView(size: size)
             .with(\.isNeverFocusable, false)
     }
 

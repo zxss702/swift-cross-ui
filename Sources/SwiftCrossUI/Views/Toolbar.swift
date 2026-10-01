@@ -245,7 +245,8 @@ struct ToolbarBar: View {
         ForEach(Array(items.enumerated()), id: \.offset) { item in
             switch item.element.kind {
             case .view(let view):
-                view
+                // Toolbar labels render icon-only, as on macOS.
+                view.labelsHidden()
             case .spacer(.fixed):
                 Spacer().frame(width: 16)
             case .spacer(.flexible):

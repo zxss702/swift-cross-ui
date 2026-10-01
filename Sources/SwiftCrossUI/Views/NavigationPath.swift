@@ -66,20 +66,37 @@ public struct NavigationPath {
     /// - Parameter k: The number of elements to remove from the path.
     public mutating func removeLast(_ k: Int = 1) {
         precondition(k >= 0, "`k` must be greater than or equal to zero")
+        var removed: [any Codable]
         if k < storage.path.count {
+            removed = Array(storage.path.suffix(k))
             storage.path.removeLast(k)
         } else if k < count {
             storage.encodedEntries.removeLast(k - storage.path.count)
+            removed = storage.path
             storage.path.removeAll()
         } else {
-            removeAll()
+            removed = storage.path
+            storage.path.removeAll()
+            storage.encodedEntries.removeAll()
         }
+        fireDismissals(of: removed)
     }
 
     /// Removes all values from this path.
     public mutating func removeAll() {
+        let removed = storage.path
         storage.path.removeAll()
         storage.encodedEntries.removeAll()
+        fireDismissals(of: removed)
+    }
+
+    /// Notifies popped link entries that they've been dismissed so that
+    /// presentation state (such as `navigationDestination(item:)` bindings)
+    /// is reset before the underlying views re-render.
+    private func fireDismissals(of removed: [any Codable]) {
+        for element in removed {
+            (element as? NavigationViewLinkEntry)?.onDismiss?()
+        }
     }
 
     /// Gets the path's current entries.
