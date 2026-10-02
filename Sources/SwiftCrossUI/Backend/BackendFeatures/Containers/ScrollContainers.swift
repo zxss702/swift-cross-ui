@@ -50,4 +50,26 @@ extension BackendFeatures {
             hasVerticalScrollBar: Bool
         )
     }
+
+    /// Backend methods for reporting scroll viewport changes.
+    ///
+    /// Backends conforming to this protocol enable lazy containers (such as
+    /// ``LazyVStack``) to materialize only the visible slice of their content.
+    /// Conformance is optional; backends that don't conform fall back to
+    /// eager materialization.
+    @MainActor
+    public protocol ScrollViewportReporting: Core {
+        /// Registers a handler invoked whenever the scroll view's vertical
+        /// offset or viewport height changes (including during scrolling).
+        ///
+        /// - Parameters:
+        ///   - scrollView: The scroll container widget previously created by
+        ///     ``ScrollContainers/createScrollContainer(for:)``.
+        ///   - handler: Called with the new vertical offset and viewport
+        ///     height, in points.
+        func setScrollViewportChangeHandler(
+            _ scrollView: Widget,
+            handler: @escaping @MainActor (_ verticalOffset: Double, _ viewportHeight: Double) -> Void
+        )
+    }
 }

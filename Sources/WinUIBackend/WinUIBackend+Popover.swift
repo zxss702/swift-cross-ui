@@ -5,6 +5,20 @@ import WinUI
 extension WinUIBackend: BackendFeatures.Popovers {
     public func createPopover(content: Widget) -> WinUI.Flyout {
         let flyout = WinUI.Flyout()
+        // SwiftUI popovers render the content edge-to-edge inside the bubble —
+        // strip the default FlyoutPresenter padding (the boxed zero thickness
+        // is a genuine XAML-boxed value; a Swift `Thickness` boxes to an
+        // inspectable the style engine can't apply and would crash it).
+        let presenterStyle = WinUI.Style(
+            WinUI.TypeName(
+                name: "Microsoft.UI.Xaml.Controls.FlyoutPresenter",
+                kind: .metadata
+            )
+        )
+        presenterStyle.setters.append(
+            WinUI.Setter(WinUI.FlyoutPresenter.paddingProperty, boxedZeroThickness)
+        )
+        flyout.flyoutPresenterStyle = presenterStyle
         flyout.content = content as? WinUI.UIElement
         flyout.closed.addHandler { [weak internalState, weak flyout] _, _ in
             guard let internalState, let flyout else { return }

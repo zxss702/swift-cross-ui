@@ -73,10 +73,17 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
             childProposal[component: axis] = nil
         }
 
+        // Publish the viewport to descendants so that lazy containers can
+        // materialize only the visible slice of their content.
+        let childEnvironment =
+            axes.contains(.vertical)
+            ? environment.with(\.scrollViewport, children.viewport)
+            : environment
+
         let childResult = children.child.computeLayout(
             with: body,
             proposedSize: childProposal,
-            environment: environment.with(
+            environment: childEnvironment.with(
                 \.allowLayoutCaching,
                 !willEarlyExit || environment.allowLayoutCaching
             )
@@ -126,7 +133,7 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
         let finalChildResult = children.child.computeLayout(
             with: nil,
             proposedSize: finalContentSizeProposal,
-            environment: environment
+            environment: childEnvironment
         )
 
         // Compute the outer size.
@@ -214,6 +221,38 @@ public struct ScrollView<Content: View>: TypeSafeView, View {
             hasHorizontalScrollBar: children.hasHorizontalScrollBar,
             hasVerticalScrollBar: children.hasVerticalScrollBar
         )
+
+        if axes.contains(.vertical) {
+            children.viewport.update(
+                verticalOffset: children.viewport.verticalOffset,
+                viewportHeight: scrollViewSize.height
+            )
+            if !children.viewportHandlerInstalled,
+                let reporting = backend as? any BackendFeatures.ScrollViewportReporting
+            {
+                children.viewportHandlerInstalled = true
+                Self.installViewportHandler(
+                    on: AnyWidget(widget),
+                    viewport: children.viewport,
+                    with: reporting
+                )
+            }
+        }
+    }
+
+    /// Re-binds ``BackendFeatures/ScrollViewportReporting``'s associated
+    /// widget type so that the optional feature can be used through a
+    /// protocol existential.
+    @MainActor
+    private static func installViewportHandler<ReportingBackend: BackendFeatures.ScrollViewportReporting>(
+        on widget: AnyWidget,
+        viewport: ScrollViewport,
+        with backend: ReportingBackend
+    ) {
+        backend.setScrollViewportChangeHandler(widget.into()) {
+            [weak viewport] offset, height in
+            viewport?.update(verticalOffset: offset, viewportHeight: height)
+        }
     }
 }
 
@@ -223,6 +262,13 @@ class ScrollViewChildren<Content: View>: ViewGraphNodeChildren {
 
     var hasVerticalScrollBar = false
     var hasHorizontalScrollBar = false
+
+    /// The viewport published to descendants via
+    /// ``EnvironmentValues/scrollViewport``.
+    let viewport = ScrollViewport()
+    /// Whether the backend's viewport change handler has been installed on
+    /// this scroll view's widget yet.
+    var viewportHandlerInstalled = false
 
     var child: AnyViewGraphNode<VStack<Content>> {
         children.child0

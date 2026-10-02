@@ -311,6 +311,15 @@ extension EnvironmentValues {
     /// recorded by ``View/scrollClipDisabled(_:)``.
     @Entry public var scrollClipDisabled = false
 
+    /// The viewport of the nearest enclosing ``ScrollView`` that scrolls
+    /// vertically. Published by ``ScrollView`` so that lazy containers such
+    /// as ``LazyVStack`` can materialize only the visible elements.
+    @Entry internal var scrollViewport: ScrollViewport?
+
+    /// Whether this view is a descendant of a ``LazyVStack``. Consumed by
+    /// ``ForEach`` to decide whether element windowing is permitted.
+    @Entry internal var lazyStackEnabled = false
+
     /// The opacity of views within this scope. Applied by backends when
     /// opacity support lands.
     @Entry public var viewOpacity: Double = 1

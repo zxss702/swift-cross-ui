@@ -25,6 +25,12 @@ extension WinUIBackend: BackendFeatures.SymbolViews {
         block.fontWeight = UWP.FontWeights.normal
         block.horizontalTextAlignment = .center
         block.verticalAlignment = .center
+        // Measure to the glyph's ink bounds rather than the font's line box:
+        // icon glyphs all share the same em square but have different ink
+        // heights, so full line bounds make every glyph measure identically
+        // and centre the *line box* — leaving short glyphs optically high.
+        // Tight bounds centre each glyph's actual ink inside its frame.
+        block.textLineBounds = .tight
         block.isTextSelectionEnabled = false
         return block
     }

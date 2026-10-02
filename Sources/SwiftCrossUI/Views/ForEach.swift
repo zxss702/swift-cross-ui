@@ -94,6 +94,37 @@ extension ForEach: TypeSafeView, View where Child: View {
             )
         }
 
+        if environment.lazyStackEnabled,
+            let viewport = environment.scrollViewport,
+            environment.layoutOrientation == .vertical
+        {
+            return computeWindowedLayout(
+                widget,
+                children: children,
+                viewport: viewport,
+                idKeyPath: idKeyPath,
+                proposedSize: proposedSize,
+                environment: environment,
+                backend: backend
+            )
+        }
+
+        if children.isWindowed {
+            // Leaving windowed mode: drop the materialized widgets; the eager
+            // diff below repopulates the container from scratch.
+            for index in (0..<children.containerIDs.count).reversed() {
+                children.queuedChanges.append(.removeChild(index))
+            }
+            children.containerIDs = []
+            children.windowedNodes = []
+            children.nodesByID = [:]
+            children.windowedElements = []
+            children.measuredHeights = [:]
+            children.measuredViews = [:]
+            children.measuredWidths = [:]
+            children.isWindowed = false
+        }
+
         var oldIdentifiers = children.identifiers
         let newIdentifiers = elements.map { $0[keyPath: idKeyPath] }
 
@@ -203,6 +234,167 @@ extension ForEach: TypeSafeView, View where Child: View {
         )
     }
 
+    /// Returns whether two child views compare equal when the child type
+    /// conforms to `Equatable`. Children without an `Equatable` conformance
+    /// are conservatively treated as changed (matching eager ``ForEach``
+    /// behaviour, which always re-lays-out every row on update).
+    private func childViewsEqual(_ a: Child, _ b: Child) -> Bool {
+        guard let equatable = a as? any Equatable else {
+            return false
+        }
+        return equatable.isEqual(b)
+    }
+
+    /// Lays out only the elements intersecting the scroll viewport (plus an
+    /// overscan margin), reporting the estimated full content height so that
+    /// the enclosing scroll view sizes its content correctly.
+    ///
+    /// Only used when the ``ForEach`` sits inside a ``LazyVStack`` within a
+    /// vertically scrolling ``ScrollView`` whose backend reports viewport
+    /// changes. Reading the viewport's properties here registers an
+    /// observation on this view's node, so scrolling re-runs just this
+    /// view's layout through the usual machinery.
+    @MainActor
+    func computeWindowedLayout<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        children: Children,
+        viewport: ScrollViewport,
+        idKeyPath: KeyPath<Items.Element, ID>,
+        proposedSize: ProposedViewSize,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) -> ViewLayoutResult {
+        let offset = max(0, viewport.verticalOffset)
+        let viewportHeight = viewport.viewportHeight
+
+        let elementsArray = elements as? [Items.Element] ?? Array(elements)
+        let count = elementsArray.count
+        let newIDs = elementsArray.map { $0[keyPath: idKeyPath] }
+        let spacing = environment.layoutSpacing
+
+        if !children.isWindowed {
+            children.isWindowed = true
+            if !children.nodes.isEmpty {
+                // Adopt eagerly materialized nodes into the reuse pool; their
+                // widgets are already in the container in element order.
+                children.containerIDs = children.identifiers
+                for (index, node) in children.nodes.enumerated() {
+                    children.nodesByID[children.identifiers[index]] = node
+                }
+                children.nodes = []
+                children.identifierMap = [:]
+                children.identifiers = []
+                children.layoutableChildren = []
+            }
+        }
+
+        // Seed the height estimate before any real measurements exist.
+        if children.defaultHeight <= 0 {
+            children.defaultHeight = 30
+        }
+
+        func height(ofIndex index: Int) -> Double {
+            children.measuredHeights[newIDs[index]] ?? children.defaultHeight
+        }
+
+        // Compute the materialization range: elements intersecting the
+        // viewport plus one viewport-height (or a bootstrap margin) of
+        // overscan on each side.
+        let overscan = max(viewportHeight, 600)
+        let visLo = max(0, offset - overscan)
+        let visHi = offset + viewportHeight + overscan
+        var lo = count
+        var hi = 0
+        var y = 0.0
+        for i in 0..<count {
+            let bottom = y + height(ofIndex: i)
+            if bottom > visLo, lo == count { lo = i }
+            if bottom > visLo, y < visHi { hi = i + 1 }
+            y = bottom + spacing
+        }
+        if lo == count {
+            // Scrolled past the estimated end; materialize the last overscan's
+            // worth of elements so the estimate can be corrected against
+            // reality and the viewport still has content to show.
+            hi = count
+            var back = 0.0
+            var i = count
+            while i > 0, back < overscan + viewportHeight {
+                i -= 1
+                back += height(ofIndex: i) + spacing
+            }
+            lo = i
+        }
+
+        // Diff the container's current widget sequence (containerIDs) into
+        // the desired window (desiredIDs). Elements leaving the window are
+        // evicted from the reuse pool entirely; surviving widgets keep their
+        // positions because the desired window is a contiguous slice of the
+        // same element order, so the survivors form an ordered subsequence.
+        var containerIDs = children.containerIDs
+        let desiredIDs = Array(newIDs[lo..<hi])
+        let desiredSet = Set(desiredIDs)
+
+        var ci = 0
+        while ci < containerIDs.count {
+            if desiredSet.contains(containerIDs[ci]) {
+                ci += 1
+            } else {
+                children.queuedChanges.append(.removeChild(ci))
+                children.nodesByID.removeValue(forKey: containerIDs[ci])
+                children.measuredViews.removeValue(forKey: containerIDs[ci])
+                containerIDs.remove(at: ci)
+            }
+        }
+
+        // Insert the missing ids. After the removals above the surviving
+        // widgets are an ordered subsequence of the desired window, so the
+        // merge is simply: at each desired index, either the widget is
+        // already in place or it must be inserted there.
+        for (i, id) in desiredIDs.enumerated() {
+            if i < containerIDs.count, containerIDs[i] == id {
+                continue
+            }
+            let element = elementsArray[lo + i]
+            let node =
+                children.nodesByID[id]
+                ?? AnyViewGraphNode(
+                    for: child(element),
+                    backend: backend,
+                    environment: environment
+                )
+            children.queuedChanges.append(.insertChild(node.widget, i))
+            containerIDs.insert(id, at: i)
+            children.nodesByID[id] = node
+        }
+        children.containerIDs = containerIDs
+
+        // Record the materialized window for `commit`, which is where the
+        // children actually get laid out. Layout probes only need the size
+        // estimate computed below, so probing passes don't touch the
+        // children at all.
+        children.windowedNodes = desiredIDs.compactMap { children.nodesByID[$0] }
+        children.windowedElements = elementsArray
+        children.windowedLo = lo
+
+        // The estimated total height from the most recently measured row
+        // heights; the scroll view sizes its content against this.
+        var cursor = 0.0
+        for i in 0..<count {
+            cursor += height(ofIndex: i) + spacing
+        }
+        let total = max(0, cursor - spacing)
+
+        return ViewLayoutResult(
+            size: ViewSize(
+                proposedSize.width ?? children.maxMeasuredWidth,
+                total
+            ),
+            childResults: [],
+            participateInStackLayoutsWhenEmpty: !desiredIDs.isEmpty
+        )
+    }
+
     @MainActor
     func deprecatedUpdate<Backend: BaseAppBackend>(
         _ widget: Backend.Widget,
@@ -292,6 +484,86 @@ extension ForEach: TypeSafeView, View where Child: View {
         }
         children.queuedChanges = []
 
+        if children.isWindowed {
+            backend.setSize(of: widget, to: layout.size.vector)
+
+            // Lay out each materialized row at the committed width, now that
+            // the final size is known (probes only used size estimates). Rows
+            // whose child view compares equal to the one from the previous
+            // commit are skipped (EquatableView semantics); rows with a
+            // non-Equatable child type are always re-laid-out.
+            let rowWidth = layout.size.width
+            let rowProposal = ProposedViewSize(rowWidth, nil)
+            let widthChanged = children.measuredAtWidth != rowWidth
+            children.measuredAtWidth = rowWidth
+            let elementsArray = children.windowedElements
+            var measured: [ID: Double] = [:]
+            var maxWidth = 0.0
+            for (i, node) in children.windowedNodes.enumerated() {
+                let id = children.containerIDs[i]
+                let element = elementsArray[children.windowedLo + i]
+                let childView = child(element)
+                if !widthChanged,
+                    let previousView = children.measuredViews[id],
+                    childViewsEqual(previousView, childView),
+                    let height = children.measuredHeights[id]
+                {
+                    measured[id] = height
+                    maxWidth = max(maxWidth, children.measuredWidths[id] ?? 0)
+                    continue
+                }
+                _ = node.computeLayout(
+                    with: childView,
+                    proposedSize: rowProposal,
+                    environment: environment
+                )
+                let result = node.commit()
+                measured[id] = result.size.height
+                children.measuredViews[id] = childView
+                children.measuredWidths[id] = result.size.width
+                maxWidth = max(maxWidth, result.size.width)
+            }
+            children.measuredHeights.merge(measured) { _, new in new }
+            if !children.measuredHeights.isEmpty {
+                children.defaultHeight =
+                    children.measuredHeights.values.reduce(0, +)
+                    / Double(children.measuredHeights.count)
+            }
+            children.maxMeasuredWidth = max(children.maxMeasuredWidth, maxWidth)
+
+            // Position the materialized rows at their absolute offsets within
+            // the full content, computed from the freshest known heights.
+            let alignment = environment.layoutAlignment
+            let spacing = environment.layoutSpacing
+            var cursor = 0.0
+            var nodeIndex = 0
+            for (i, element) in elementsArray.enumerated() {
+                if i >= children.windowedLo,
+                    nodeIndex < children.windowedNodes.count,
+                    element[keyPath: idKeyPath!] == children.containerIDs[nodeIndex]
+                {
+                    let id = children.containerIDs[nodeIndex]
+                    var position = Position.zero
+                    switch alignment {
+                        case .leading:
+                            position.x = 0
+                        case .center:
+                            position.x = (layout.size.width - (children.measuredWidths[id] ?? 0)) / 2
+                        case .trailing:
+                            position.x = layout.size.width - (children.measuredWidths[id] ?? 0)
+                    }
+                    position.y = cursor
+                    backend.setPosition(ofChildAt: nodeIndex, in: widget, to: position.vector)
+                    cursor += children.measuredHeights[id] ?? children.defaultHeight
+                    nodeIndex += 1
+                } else {
+                    cursor += children.measuredHeights[element[keyPath: idKeyPath!]] ?? children.defaultHeight
+                }
+                cursor += spacing
+            }
+            return
+        }
+
         LayoutSystem.commitStackLayout(
             container: widget,
             children: children.layoutableChildren,
@@ -362,14 +634,50 @@ class ForEachViewChildren<
     /// identifiers haven't changed since the previous layout computation.
     var layoutableChildren: [LayoutSystem.LayoutableChild] = []
 
+    // MARK: Windowed mode
+
+    /// Whether this ForEach is materializing only the elements near the
+    /// scroll viewport (see ``ForEach/computeWindowedLayout``).
+    var isWindowed = false
+    /// The identifiers of the widgets currently in the container, in display
+    /// order. Only populated in windowed mode.
+    var containerIDs: [ID] = []
+    /// The materialized nodes, keyed by element identifier. In windowed mode
+    /// this pool contains exactly the nodes whose widgets are in the
+    /// container.
+    var nodesByID: [ID: AnyViewGraphNode<Child>] = [:]
+    /// The materialized nodes in display order, parallel to ``containerIDs``.
+    var windowedNodes: [AnyViewGraphNode<Child>] = []
+    /// The element list snapshot used by the windowed `commit` pass.
+    var windowedElements: [Items.Element] = []
+    /// The index of the first materialized element within ``windowedElements``.
+    var windowedLo = 0
+    /// Measured heights of materialized elements, keyed by identifier.
+    /// Retained across window shifts so that offset estimates converge.
+    var measuredHeights: [ID: Double] = [:]
+    /// The height assumed for elements that haven't been measured yet.
+    var defaultHeight = 0.0
+    /// The widest measured row width, used as the ForEach's width when the
+    /// proposal doesn't specify one.
+    var maxMeasuredWidth = 0.0
+    /// The child view most recently committed for each identifier. Compared
+    /// dynamically (when `Child` is `Equatable`) to skip re-laying-out rows
+    /// whose view hasn't changed since the previous commit.
+    var measuredViews: [ID: Child] = [:]
+    /// The measured width of each row at the current row width.
+    var measuredWidths: [ID: Double] = [:]
+    /// The row width that ``measuredViews``/``measuredWidths`` were
+    /// recorded at. A change forces re-measuring every materialized row.
+    var measuredAtWidth = 0.0
+
     var widgets: [AnyWidget] {
-        nodes.map(\.widget)
+        (isWindowed ? windowedNodes : nodes).map(\.widget)
     }
 
     // TODO: This pattern of erasing by wrapping in a temporary class seems
     //   inefficient. Could ErasedViewGraphNode maybe be a struct instead?
     var erasedNodes: [ErasedViewGraphNode] {
-        nodes.map(ErasedViewGraphNode.init(wrapping:))
+        (isWindowed ? windowedNodes : nodes).map(ErasedViewGraphNode.init(wrapping:))
     }
 
     var stackLayoutCache = StackLayoutCache.initial
@@ -403,6 +711,15 @@ class ForEachViewChildren<
         } else {
             nodes = []
         }
+    }
+}
+
+extension Equatable {
+    /// Compares this value to a dynamically-typed value, used by ``ForEach``'s
+    /// windowed layout to detect unchanged elements without requiring an
+    /// `Equatable` constraint on the element type.
+    fileprivate func isEqual(_ other: Any) -> Bool {
+        (other as? Self) == self
     }
 }
 

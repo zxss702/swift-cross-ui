@@ -16,9 +16,11 @@ public struct PinnedScrollableViews: OptionSet, Sendable {
 /// A view that arranges its subviews vertically, creating items only as
 /// needed.
 ///
-/// Items are currently materialized eagerly like a ``VStack``; true lazy
-/// materialization requires scroll-view visibility tracking and is planned
-/// for a future release.
+/// When placed in a vertically scrolling ``ScrollView`` on a backend that
+/// reports viewport changes, ``ForEach`` descendants materialize only the
+/// elements near the visible region. On backends without viewport reporting
+/// (or when not inside a ``ScrollView``) all items are materialized eagerly
+/// like a ``VStack``.
 public struct LazyVStack<Content: View>: View {
     private var alignment: HorizontalAlignment
     private var spacing: Double?
@@ -40,6 +42,7 @@ public struct LazyVStack<Content: View>: View {
         VStack(alignment: alignment, spacing: spacing) {
             content
         }
+        .environment(\.lazyStackEnabled, true)
     }
 }
 

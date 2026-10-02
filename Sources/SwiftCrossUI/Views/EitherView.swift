@@ -48,6 +48,16 @@ extension EitherView: View {
     }
 }
 
+extension EitherView: Equatable where A: Equatable, B: Equatable {
+    public static func == (lhs: EitherView, rhs: EitherView) -> Bool {
+        switch (lhs.storage, rhs.storage) {
+            case (.a(let a), .a(let b)): a == b
+            case (.b(let a), .b(let b)): a == b
+            default: false
+        }
+    }
+}
+
 extension EitherView: TypeSafeView {
     func children<Backend: BaseAppBackend>(
         backend: Backend,

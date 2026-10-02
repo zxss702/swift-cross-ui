@@ -103,7 +103,8 @@ public final class WinUIBackend:
     BackendFeatures.DatePickers,
     BackendFeatures.Windowing,
     BackendFeatures.LinearGradients,
-    BackendFeatures.RadialGradients
+    BackendFeatures.RadialGradients,
+    BackendFeatures.ScrollViewportReporting
 {
     // Logging
     private struct LogLocation: Hashable, Equatable {
@@ -160,6 +161,10 @@ public final class WinUIBackend:
         var toggleClickActions: [ObjectIdentifier: (Bool) -> Void] = [:]
         var switchClickActions: [ObjectIdentifier: (Bool) -> Void] = [:]
         var sliderChangeActions: [ObjectIdentifier: (Double) -> Void] = [:]
+        /// Scroll viewport change handlers, keyed by ScrollViewer identity.
+        /// Invoked on `viewChanging`/`viewChanged` so that lazy containers
+        /// can rematerialize the visible slice while scrolling.
+        var scrollViewportChangeHandlers: [ObjectIdentifier: (Double, Double) -> Void] = [:]
         var webViewNavigationStartingHandlers: [ObjectIdentifier: EventCleanup] = [:]
         var webViewNavigationCompletedHandlers: [ObjectIdentifier: EventCleanup] = [:]
         var webViewCoreInitializedHandlers: [ObjectIdentifier: EventCleanup] = [:]
@@ -173,6 +178,16 @@ public final class WinUIBackend:
         /// `contextRequested` handler always reads the latest items.
         var contextMenuFlyouts: [ObjectIdentifier: MenuFlyout] = [:]
 
+        /// The signature of the items currently rendered into each widget's
+        /// context-menu flyout, so unchanged menus aren't rebuilt on every
+        /// commit (the rebuild walks the WinRT boundary per item).
+        var contextMenuSignatures: [ObjectIdentifier: String] = [:]
+
+        /// The action boxes bound into each widget's rendered context-menu
+        /// items, in render order. Updated on every update so that handlers
+        /// invoke the latest closures even when the flyout isn't rebuilt.
+        var contextMenuActions: [ObjectIdentifier: [ContextMenuActionBox]] = [:]
+
         /// Widgets that already have a `contextRequested` handler attached.
         var contextMenuHooks: Set<ObjectIdentifier> = []
 
@@ -182,6 +197,12 @@ public final class WinUIBackend:
         /// `TextBlock` — the same (text, font, proposal) triples recur
         /// constantly.
         var textMeasurementCache: [TextMeasurementKey: SIMD2<Int>] = [:]
+
+        /// The signature of the last environment applied to each TextBlock via
+        /// `EnvironmentValues.apply(to:cachingIn:)`. Every property read in
+        /// `apply` is a COM call (~10µs each), so skipping the whole update
+        /// when the applied values are unchanged is worthwhile.
+        var appliedTextBlockSignatures: [ObjectIdentifier: Int] = [:]
     }
 
     struct TextMeasurementKey: Hashable {
@@ -657,16 +678,28 @@ public final class WinUIBackend:
 
     public func show(widget _: Widget) {}
 
+    /// The latest action/onChange closures of a rendered menu item. Click
+    /// handlers capture the box rather than the closure so that the closures
+    /// can be refreshed without rebuilding the flyout items.
+    final class ContextMenuActionBox {
+        var action: (@MainActor () -> Void)?
+        var onChange: (@MainActor (Bool) -> Void)?
+    }
+
     private func renderMenuItem(
         _ item: ResolvedMenu.Item,
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        actionBoxes: inout [ContextMenuActionBox]
     ) -> MenuFlyoutItemBase {
         switch item {
             case .button(let label, let action):
                 let widget = MenuFlyoutItem()
                 widget.text = label
+                let box = ContextMenuActionBox()
+                box.action = action
+                actionBoxes.append(box)
                 widget.click.addHandler { _, _ in
-                    action?()
+                    box.action?()
                 }
                 widget.isEnabled = environment.isEnabled
                 return widget
@@ -674,11 +707,14 @@ public final class WinUIBackend:
                 let widget = ToggleMenuFlyoutItem()
                 widget.text = label
                 widget.isChecked = value
+                let box = ContextMenuActionBox()
+                box.onChange = onChange
+                actionBoxes.append(box)
                 widget.click.addHandler { [weak widget] sender, _ in
                     let checked =
                         (sender as? ToggleMenuFlyoutItem)?.isChecked ?? widget?.isChecked
                     guard let checked else { return }
-                    onChange(checked)
+                    box.onChange?(checked)
                 }
                 widget.isEnabled = environment.isEnabled
                 return widget
@@ -689,12 +725,67 @@ public final class WinUIBackend:
                 widget.text = submenu.label
                 for subitem in submenu.content.items {
                     widget.items.append(
-                        renderMenuItem(subitem, environment: environment)
+                        renderMenuItem(
+                            subitem, environment: environment, actionBoxes: &actionBoxes)
                     )
                 }
                 return widget
             case .modifiedEnvironment(let item, let modification):
-                return renderMenuItem(item, environment: modification(environment))
+                return renderMenuItem(
+                    item, environment: modification(environment), actionBoxes: &actionBoxes)
+        }
+    }
+
+    /// A signature of the visible structure of a menu item: label, toggle
+    /// state, enabled state, and submenu structure. Action closures are
+    /// deliberately excluded — they're refreshed separately via
+    /// ``ContextMenuActionBox``.
+    private func contextMenuItemSignature(
+        _ item: ResolvedMenu.Item,
+        environment: EnvironmentValues
+    ) -> String {
+        let enabled = environment.isEnabled ? "1" : "0"
+        switch item {
+            case .button(let label, _):
+                return "b\(enabled):\(label)"
+            case .toggle(let label, let value, _):
+                return "t\(enabled):\(label):\(value)"
+            case .separator:
+                return "s"
+            case .submenu(let submenu):
+                let inner = submenu.content.items.map {
+                    contextMenuItemSignature($0, environment: environment)
+                }.joined(separator: ",")
+                return "m:\(submenu.label)(\(inner))"
+            case .modifiedEnvironment(let item, let modification):
+                return contextMenuItemSignature(
+                    item, environment: modification(environment))
+        }
+    }
+
+    /// Pushes the latest action/onChange closures into the boxes bound into
+    /// already-rendered menu items, walking `items` in the same order they
+    /// were rendered.
+    private func refreshMenuItemActions(
+        _ items: [ResolvedMenu.Item],
+        boxes: [ContextMenuActionBox],
+        index: inout Int
+    ) {
+        for item in items {
+            switch item {
+                case .button(_, let action):
+                    if index < boxes.count { boxes[index].action = action }
+                    index += 1
+                case .toggle(_, _, let onChange):
+                    if index < boxes.count { boxes[index].onChange = onChange }
+                    index += 1
+                case .separator:
+                    break
+                case .submenu(let submenu):
+                    refreshMenuItemActions(submenu.content.items, boxes: boxes, index: &index)
+                case .modifiedEnvironment(let item, _):
+                    refreshMenuItemActions([item], boxes: boxes, index: &index)
+            }
         }
     }
 
@@ -760,9 +851,11 @@ public final class WinUIBackend:
             if index > 0 {
                 flyout.items.append(MenuFlyoutSeparator())
             }
+            var actionBoxes: [ContextMenuActionBox] = []
             for subitem in submenu.content.items {
                 flyout.items.append(
-                    renderMenuItem(subitem, environment: environment)
+                    renderMenuItem(
+                        subitem, environment: environment, actionBoxes: &actionBoxes)
                 )
             }
         }
@@ -1275,7 +1368,7 @@ public final class WinUIBackend:
             block.isTextSelectionEnabled = environment.isTextSelectionEnabled
         }
         // TODO: Font design handling (monospace vs normal)
-        environment.apply(to: block)
+        environment.apply(to: block, cachingIn: internalState)
     }
 
     public func createSimpleButton() -> Widget {
@@ -1302,11 +1395,11 @@ public final class WinUIBackend:
             if block.text != label {
                 block.text = label
             }
-            environment.apply(to: block)
+            environment.apply(to: block, cachingIn: internalState)
         } else {
             let block = createTextView() as! WinUI.TextBlock
             block.text = label
-            environment.apply(to: block)
+            environment.apply(to: block, cachingIn: internalState)
             button.content = block
         }
 
@@ -1326,8 +1419,10 @@ public final class WinUIBackend:
         environment: EnvironmentValues
     ) {
         menu.items.clear()
+        var actionBoxes: [ContextMenuActionBox] = []
         for item in content.items {
-            menu.items.append(renderMenuItem(item, environment: environment))
+            menu.items.append(
+                renderMenuItem(item, environment: environment, actionBoxes: &actionBoxes))
         }
     }
 
@@ -1340,17 +1435,34 @@ public final class WinUIBackend:
 
         guard let items else {
             internalState.contextMenuFlyouts.removeValue(forKey: id)
+            internalState.contextMenuSignatures.removeValue(forKey: id)
+            internalState.contextMenuActions.removeValue(forKey: id)
             if widget.contextFlyout != nil {
                 widget.contextFlyout = nil
             }
             return
         }
 
+        let signature = items.items.map {
+            contextMenuItemSignature($0, environment: environment)
+        }.joined(separator: "|")
+
         let flyout = internalState.contextMenuFlyouts[id] ?? MenuFlyout()
         internalState.contextMenuFlyouts[id] = flyout
-        flyout.items.clear()
-        for item in items.items {
-            flyout.items.append(renderMenuItem(item, environment: environment))
+
+        if internalState.contextMenuSignatures[id] != signature {
+            internalState.contextMenuSignatures[id] = signature
+            var actionBoxes: [ContextMenuActionBox] = []
+            flyout.items.clear()
+            for item in items.items {
+                flyout.items.append(
+                    renderMenuItem(item, environment: environment, actionBoxes: &actionBoxes)
+                )
+            }
+            internalState.contextMenuActions[id] = actionBoxes
+        } else if let actionBoxes = internalState.contextMenuActions[id] {
+            var index = 0
+            refreshMenuItemActions(items.items, boxes: actionBoxes, index: &index)
         }
 
         // `UIElement.contextFlyout` doesn't reliably auto-show in XAML
@@ -1388,11 +1500,11 @@ public final class WinUIBackend:
             if block.text != label {
                 block.text = label
             }
-            environment.apply(to: block)
+            environment.apply(to: block, cachingIn: internalState)
         } else {
             let block = createTextView() as! WinUI.TextBlock
             block.text = label
-            environment.apply(to: block)
+            environment.apply(to: block, cachingIn: internalState)
             button.content = block
         }
 
@@ -1417,6 +1529,20 @@ public final class WinUIBackend:
         scrollViewer.content = child
         child.horizontalAlignment = .left
         child.verticalAlignment = .top
+        scrollViewer.viewChanging.addHandler { [weak internalState, weak scrollViewer] _, args in
+            guard let internalState, let scrollViewer else { return }
+            internalState.scrollViewportChangeHandlers[ObjectIdentifier(scrollViewer)]?(
+                args?.nextView?.verticalOffset ?? scrollViewer.verticalOffset,
+                scrollViewer.viewportHeight
+            )
+        }
+        scrollViewer.viewChanged.addHandler { [weak internalState, weak scrollViewer] _, _ in
+            guard let internalState, let scrollViewer else { return }
+            internalState.scrollViewportChangeHandlers[ObjectIdentifier(scrollViewer)]?(
+                scrollViewer.verticalOffset,
+                scrollViewer.viewportHeight
+            )
+        }
         return scrollViewer
     }
 
@@ -1442,6 +1568,13 @@ public final class WinUIBackend:
         scrollViewer.isVerticalRailEnabled = hasVerticalScrollBar
         scrollViewer.verticalScrollMode = hasVerticalScrollBar ? .enabled : .disabled
         scrollViewer.verticalScrollBarVisibility = hasVerticalScrollBar ? .visible : .hidden
+    }
+
+    public func setScrollViewportChangeHandler(
+        _ scrollView: Widget,
+        handler: @escaping @MainActor (Double, Double) -> Void
+    ) {
+        internalState.scrollViewportChangeHandlers[ObjectIdentifier(scrollView)] = handler
     }
 
     class CustomListView: WinUI.ListView {
@@ -1702,7 +1835,7 @@ public final class WinUIBackend:
                 for option in options[picker.items.count...] {
                     let block = TextBlock()
                     block.text = option
-                    environment.apply(to: block)
+                    environment.apply(to: block, cachingIn: internalState)
                     picker.items.append(block)
                 }
             }
@@ -2760,7 +2893,33 @@ extension EnvironmentValues {
 
     @MainActor
     func apply(to textBlock: WinUI.TextBlock) {
+        apply(to: textBlock, cachingIn: nil)
+    }
+
+    @MainActor
+    func apply(to textBlock: WinUI.TextBlock, cachingIn internalState: WinUIBackend.InternalState?) {
         let resolvedFont = resolvedFont
+        let foregroundColor = suggestedForegroundColor.resolve(in: self).uwpColor
+        if let internalState {
+            var hasher = Hasher()
+            hasher.combine(resolvedFont.pointSize)
+            hasher.combine(resolvedFont.winUIFontWeight)
+            hasher.combine(resolvedFont.lineHeight)
+            hasher.combine(resolvedFont.isItalic)
+            if case .named(let family) = resolvedFont.identifier.kind {
+                hasher.combine(family)
+            }
+            hasher.combine(foregroundColor.r)
+            hasher.combine(foregroundColor.g)
+            hasher.combine(foregroundColor.b)
+            hasher.combine(foregroundColor.a)
+            let signature = hasher.finalize()
+            let id = ObjectIdentifier(textBlock)
+            if internalState.appliedTextBlockSignatures[id] == signature {
+                return
+            }
+            internalState.appliedTextBlockSignatures[id] = signature
+        }
         // Guard every write: this runs per Text view per layout pass, and
         // XAML invalidates on writes even when the value is unchanged.
         if textBlock.fontSize != resolvedFont.pointSize {
@@ -2769,7 +2928,6 @@ extension EnvironmentValues {
         if textBlock.fontWeight.weight != resolvedFont.winUIFontWeight {
             textBlock.fontWeight.weight = resolvedFont.winUIFontWeight
         }
-        let foregroundColor = suggestedForegroundColor.resolve(in: self).uwpColor
         if let brush = textBlock.foreground as? SolidColorBrush, brush.color == foregroundColor {
         } else {
             textBlock.foreground = winUIForegroundBrush

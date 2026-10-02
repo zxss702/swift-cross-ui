@@ -149,9 +149,9 @@ extension WinUIBackend {
 }
 
 /// A zero `Thickness` boxed by XAML itself, suitable for insertion into a
-/// `ResourceDictionary` — Swift-side struct boxing produces inspectables
-/// that the template engine can't repackage.
-private let boxedZeroThickness: Any? = {
+/// `ResourceDictionary` or `Setter` — Swift-side struct boxing produces
+/// inspectables that the template engine can't repackage.
+let boxedZeroThickness: Any? = {
     let box = WinUI.Border()
     box.borderThickness = Thickness(left: 0, top: 0, right: 0, bottom: 0)
     return try? box.getValue(WinUI.Border.borderThicknessProperty)
