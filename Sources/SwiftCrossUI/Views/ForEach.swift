@@ -264,12 +264,39 @@ extension ForEach: TypeSafeView, View where Child: View {
         environment: EnvironmentValues,
         backend: Backend
     ) -> ViewLayoutResult {
+        let windowedT0 = DispatchTime.now()
+        var windowedCreated = 0
+        defer {
+            let ms = Double(DispatchTime.now().uptimeNanoseconds - windowedT0.uptimeNanoseconds) / 1e6
+            FileHandle.standardError.write("WLAYOUT off=\(viewport.verticalOffset) created=\(windowedCreated) ms=\(ms)\n".data(using: .utf8)!)
+        }
+
         let offset = max(0, viewport.verticalOffset)
         let viewportHeight = viewport.viewportHeight
 
         let elementsArray = elements as? [Items.Element] ?? Array(elements)
         let count = elementsArray.count
-        let newIDs = elementsArray.map { $0[keyPath: idKeyPath] }
+        // An identical backing buffer implies identical elements (mutation
+        // would have triggered copy-on-write), so the identifier map can be
+        // reused instead of re-extracting every id per scroll frame.
+        var sameBuffer = false
+        elementsArray.withUnsafeBufferPointer { buf in
+            children.elementsBuffer.withUnsafeBufferPointer { old in
+                sameBuffer =
+                    buf.baseAddress != nil
+                    && buf.baseAddress == old.baseAddress
+                    && buf.count == old.count
+            }
+        }
+        let newIDs: [ID]
+        if sameBuffer {
+            newIDs = children.cachedIDs
+        } else {
+            newIDs = elementsArray.map { $0[keyPath: idKeyPath] }
+            children.cachedIDs = newIDs
+            children.elementsBuffer = elementsArray
+            children.elementsVersion += 1
+        }
         let spacing = environment.layoutSpacing
 
         if !children.isWindowed {
@@ -293,6 +320,29 @@ extension ForEach: TypeSafeView, View where Child: View {
             children.defaultHeight = 30
         }
 
+        // Cumulative row tops (prefix[i] = top of row i, count+1 entries).
+        // Rebuilt lazily when the element list or measured heights change;
+        // viewport-only invalidations reuse it, making window computation
+        // O(log n) instead of rescanning every element per scroll frame.
+        if
+            children.prefixHeights.count != count + 1
+                || children.prefixVersion != children.heightsVersion
+                || children.prefixElementsVersion != children.elementsVersion
+        {
+            var prefix = [Double](repeating: 0, count: count + 1)
+            for i in 0..<count {
+                prefix[i + 1] =
+                    prefix[i]
+                    + (children.measuredHeights[newIDs[i]] ?? children.defaultHeight)
+                    + spacing
+            }
+            children.prefixHeights = prefix
+            children.prefixVersion = children.heightsVersion
+            children.prefixElementsVersion = children.elementsVersion
+            children.prefixDefaultHeight = children.defaultHeight
+        }
+        let prefix = children.prefixHeights
+
         func height(ofIndex index: Int) -> Double {
             children.measuredHeights[newIDs[index]] ?? children.defaultHeight
         }
@@ -305,12 +355,25 @@ extension ForEach: TypeSafeView, View where Child: View {
         let visHi = offset + viewportHeight + overscan
         var lo = count
         var hi = 0
-        var y = 0.0
-        for i in 0..<count {
-            let bottom = y + height(ofIndex: i)
-            if bottom > visLo, lo == count { lo = i }
-            if bottom > visLo, y < visHi { hi = i + 1 }
-            y = bottom + spacing
+        if count > 0 {
+            // Row i spans [prefix[i], prefix[i+1] - spacing); binary-search
+            // the first row whose bottom exceeds visLo and the first whose
+            // top reaches visHi.
+            var low = 0, high = count
+            while low < high {
+                let mid = (low + high) / 2
+                if prefix[mid + 1] - spacing > visLo { high = mid } else { low = mid + 1 }
+            }
+            lo = low
+            if lo < count {
+                var h = count
+                var l2 = lo
+                while l2 < h {
+                    let mid = (l2 + h) / 2
+                    if prefix[mid] < visHi { l2 = mid + 1 } else { h = mid }
+                }
+                hi = l2
+            }
         }
         if lo == count {
             // Scrolled past the estimated end; materialize the last overscan's
@@ -356,13 +419,16 @@ extension ForEach: TypeSafeView, View where Child: View {
                 continue
             }
             let element = elementsArray[lo + i]
-            let node =
-                children.nodesByID[id]
-                ?? AnyViewGraphNode(
+            var maybeNode = children.nodesByID[id]
+            if maybeNode == nil {
+                windowedCreated += 1
+                maybeNode = AnyViewGraphNode(
                     for: child(element),
                     backend: backend,
                     environment: environment
                 )
+            }
+            let node = maybeNode!
             children.queuedChanges.append(.insertChild(node.widget, i))
             containerIDs.insert(id, at: i)
             children.nodesByID[id] = node
@@ -379,11 +445,7 @@ extension ForEach: TypeSafeView, View where Child: View {
 
         // The estimated total height from the most recently measured row
         // heights; the scroll view sizes its content against this.
-        var cursor = 0.0
-        for i in 0..<count {
-            cursor += height(ofIndex: i) + spacing
-        }
-        let total = max(0, cursor - spacing)
+        let total = count > 0 ? max(0, prefix[count] - spacing) : 0
 
         return ViewLayoutResult(
             size: ViewSize(
@@ -487,6 +549,9 @@ extension ForEach: TypeSafeView, View where Child: View {
         if children.isWindowed {
             backend.setSize(of: widget, to: layout.size.vector)
 
+            let commitT0 = DispatchTime.now()
+            var commitLaidOut = 0
+
             // Lay out each materialized row at the committed width, now that
             // the final size is known (probes only used size estimates). Rows
             // whose child view compares equal to the one from the previous
@@ -499,19 +564,29 @@ extension ForEach: TypeSafeView, View where Child: View {
             let elementsArray = children.windowedElements
             var measured: [ID: Double] = [:]
             var maxWidth = 0.0
+            var heightDelta = 0.0
             for (i, node) in children.windowedNodes.enumerated() {
                 let id = children.containerIDs[i]
                 let element = elementsArray[children.windowedLo + i]
                 let childView = child(element)
-                if !widthChanged,
-                    let previousView = children.measuredViews[id],
-                    childViewsEqual(previousView, childView),
-                    let height = children.measuredHeights[id]
-                {
+                let canSkip = !widthChanged
+                    && children.measuredViews[id] != nil
+                    && childViewsEqual(children.measuredViews[id]!, childView)
+                    && children.measuredHeights[id] != nil
+                let staleHeight = children.measuredHeights[id] ?? children.prefixDefaultHeight
+                if canSkip {
+                    let height = children.measuredHeights[id]!
                     measured[id] = height
+                    heightDelta += height - staleHeight
                     maxWidth = max(maxWidth, children.measuredWidths[id] ?? 0)
                     continue
                 }
+                if let prev = children.measuredViews[id], !childViewsEqual(prev, childView) {
+                    FileHandle.standardError.write(
+                        "VIEQ-FALSE id=\(id)\n".data(using: .utf8)!
+                    )
+                }
+                commitLaidOut += 1
                 _ = node.computeLayout(
                     with: childView,
                     proposedSize: rowProposal,
@@ -519,10 +594,13 @@ extension ForEach: TypeSafeView, View where Child: View {
                 )
                 let result = node.commit()
                 measured[id] = result.size.height
+                heightDelta += result.size.height - staleHeight
                 children.measuredViews[id] = childView
                 children.measuredWidths[id] = result.size.width
                 maxWidth = max(maxWidth, result.size.width)
             }
+            let previousDefault = children.defaultHeight
+            let previousMeasuredCount = children.measuredHeights.count
             children.measuredHeights.merge(measured) { _, new in new }
             if !children.measuredHeights.isEmpty {
                 children.defaultHeight =
@@ -530,37 +608,62 @@ extension ForEach: TypeSafeView, View where Child: View {
                     / Double(children.measuredHeights.count)
             }
             children.maxMeasuredWidth = max(children.maxMeasuredWidth, maxWidth)
+            // Invalidate the prefix cache only when the merge actually
+            // changed a row height, added a measurement, or moved the
+            // default — steady-state scrolling then keeps O(log n) passes.
+            if heightDelta != 0
+                || children.measuredHeights.count != previousMeasuredCount
+                || children.defaultHeight != previousDefault
+            {
+                children.heightsVersion += 1
+            }
 
             // Position the materialized rows at their absolute offsets within
-            // the full content, computed from the freshest known heights.
+            // the full content. Rows above the materialization window were
+            // not re-measured this pass, so the cached prefix sum still
+            // gives the window's top directly; walking only materialized
+            // rows keeps this O(window) instead of O(element count).
             let alignment = environment.layoutAlignment
             let spacing = environment.layoutSpacing
-            var cursor = 0.0
-            var nodeIndex = 0
-            for (i, element) in elementsArray.enumerated() {
-                if i >= children.windowedLo,
-                    nodeIndex < children.windowedNodes.count,
-                    element[keyPath: idKeyPath!] == children.containerIDs[nodeIndex]
-                {
-                    let id = children.containerIDs[nodeIndex]
-                    var position = Position.zero
-                    switch alignment {
-                        case .leading:
-                            position.x = 0
-                        case .center:
-                            position.x = (layout.size.width - (children.measuredWidths[id] ?? 0)) / 2
-                        case .trailing:
-                            position.x = layout.size.width - (children.measuredWidths[id] ?? 0)
-                    }
-                    position.y = cursor
-                    backend.setPosition(ofChildAt: nodeIndex, in: widget, to: position.vector)
-                    cursor += children.measuredHeights[id] ?? children.defaultHeight
-                    nodeIndex += 1
-                } else {
-                    cursor += children.measuredHeights[element[keyPath: idKeyPath!]] ?? children.defaultHeight
+            var cursor =
+                children.windowedLo < children.prefixHeights.count
+                ? children.prefixHeights[children.windowedLo]
+                : 0.0
+            for nodeIndex in children.windowedNodes.indices {
+                let id = children.containerIDs[nodeIndex]
+                var position = Position.zero
+                switch alignment {
+                    case .leading:
+                        position.x = 0
+                    case .center:
+                        position.x = (layout.size.width - (children.measuredWidths[id] ?? 0)) / 2
+                    case .trailing:
+                        position.x = layout.size.width - (children.measuredWidths[id] ?? 0)
                 }
-                cursor += spacing
+                position.y = cursor
+                backend.setPosition(ofChildAt: nodeIndex, in: widget, to: position.vector)
+                cursor += (children.measuredHeights[id] ?? children.defaultHeight) + spacing
             }
+
+            // `layout.size` was computed before the rows' real heights were
+            // known (unmeasured rows contribute `defaultHeight` estimates).
+            // The corrected total is the prefix-sum total plus each
+            // materialized row's (fresh − stale) height delta; rows outside
+            // the window kept their heights so they don't contribute.
+            let prefixTotal =
+                children.prefixHeights.count == elementsArray.count + 1
+                ? children.prefixHeights[elementsArray.count]
+                : layout.size.height
+            let correctedHeight = max(0, prefixTotal - spacing + heightDelta)
+            if correctedHeight != layout.size.height {
+                environment.onResize(ViewSize(layout.size.width, correctedHeight))
+            }
+
+            let commitMs = Double(DispatchTime.now().uptimeNanoseconds - commitT0.uptimeNanoseconds) / 1e6
+            FileHandle.standardError.write(
+                "WCOMMIT nodes=\(children.windowedNodes.count) laidOut=\(commitLaidOut) ms=\(commitMs)\n"
+                    .data(using: .utf8)!
+            )
             return
         }
 
@@ -669,6 +772,30 @@ class ForEachViewChildren<
     /// The row width that ``measuredViews``/``measuredWidths`` were
     /// recorded at. A change forces re-measuring every materialized row.
     var measuredAtWidth = 0.0
+
+    /// Cumulative row-top offsets (count+1 entries) cached between
+    /// layout passes so viewport-only invalidations don't rescan the
+    /// element list. Row `i` spans `[prefixHeights[i],
+    /// prefixHeights[i+1] - spacing)`.
+    var prefixHeights: [Double] = []
+    /// The ``heightsVersion`` ``prefixHeights`` was built at.
+    var prefixVersion = -1
+    /// The ``elementsVersion`` ``prefixHeights`` was built at.
+    var prefixElementsVersion = -1
+    /// The ``defaultHeight`` used when ``prefixHeights`` was built; the
+    /// stale-height baseline for unmeasured rows.
+    var prefixDefaultHeight = 0.0
+    /// Bumped whenever measured row heights or ``defaultHeight`` may
+    /// have changed, invalidating ``prefixHeights``.
+    var heightsVersion = 0
+    /// Bumped whenever the element list's backing storage changes.
+    var elementsVersion = 0
+    /// Identifier extraction cache, keyed by element-array buffer
+    /// identity so viewport-only passes skip re-mapping every element.
+    var cachedIDs: [ID] = []
+    /// The array whose buffer ``cachedIDs`` was extracted from; held to
+    /// keep the buffer (and its identity) stable across passes.
+    var elementsBuffer: [Items.Element] = []
 
     var widgets: [AnyWidget] {
         (isWindowed ? windowedNodes : nodes).map(\.widget)

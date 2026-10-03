@@ -33,6 +33,21 @@ extension BackendFeatures {
         /// ``createWindowDragRegion()`` as the window's caption input area.
         /// Called once the element has been committed into the window's tree.
         func attachWindowDragRegion(_ widget: Widget, to window: Window)
+
+        /// Creates a navigation back button styled after the platform's
+        /// navigation chrome (e.g. the WinUI back button used by
+        /// `NavigationView`), or `nil` to render an empty placeholder in the
+        /// back button's slot.
+        func createNavigationBackButton() -> Widget?
+
+        /// Updates a button created by ``createNavigationBackButton()`` with
+        /// the current back action and environment. Called on every commit
+        /// so the click handler stays fresh as navigation state changes.
+        func updateNavigationBackButton(
+            _ widget: Widget,
+            action: (@MainActor () -> Void)?,
+            environment: EnvironmentValues
+        )
     }
 }
 
@@ -89,10 +104,15 @@ public final class WindowChromeModel: @unchecked Sendable {
     /// stale until the next full window update.
     var onDidChange: (@MainActor () -> Void)?
 
-    /// The back action contributed by the enclosing navigation stack.
-    var backAction: (@MainActor () -> Void)? { backContribution?.action }
+    /// The back action contributed by the enclosing navigation stack, or
+    /// `nil` while the displayed page hides the back button via
+    /// ``View/navigationBarBackButtonHidden(_:)``.
+    var backAction: (@MainActor () -> Void)? {
+        backHiddenContribution?.hidden == true ? nil : backContribution?.action
+    }
 
     private var backContribution: (token: ContributionToken, action: @MainActor () -> Void)?
+    private var backHiddenContribution: (token: ContributionToken, hidden: Bool)?
     private var titleContribution: (token: ContributionToken, title: Text)?
     /// Toolbar items contributed by every live ``View/toolbar`` modifier, in
     /// contribution order (outermost first — matching SwiftUI's merge
@@ -116,24 +136,57 @@ public final class WindowChromeModel: @unchecked Sendable {
     }
 
     func setBackAction(_ action: (@MainActor () -> Void)?, from token: ContributionToken) {
+        let hadAction = backAction != nil
+        let hadToken = backContribution?.token == token
         if let action {
             backContribution = (token, action)
-        } else if backContribution?.token == token {
+        } else if hadToken {
             backContribution = nil
         }
-        onDidChange?()
+        // The stored action always updates so the button's handler stays
+        // fresh, but the strip only needs relayout when the button's
+        // presence actually changed.
+        if hadAction != (backAction != nil) || !hadToken {
+            onDidChange?()
+        }
     }
 
     func clearBackAction(from token: ContributionToken) {
+        let hadAction = backAction != nil
         if backContribution?.token == token {
             backContribution = nil
+        }
+        if hadAction != (backAction != nil) {
+            onDidChange?()
+        }
+    }
+
+    func setBackHidden(_ hidden: Bool, from token: ContributionToken) {
+        let hadAction = backAction != nil
+        backHiddenContribution = (token, hidden)
+        if hadAction != (backAction != nil) {
+            onDidChange?()
+        }
+    }
+
+    func clearBackHidden(from token: ContributionToken) {
+        let hadAction = backAction != nil
+        if backHiddenContribution?.token == token {
+            backHiddenContribution = nil
+        }
+        if hadAction != (backAction != nil) {
             onDidChange?()
         }
     }
 
     func setTitle(_ title: Text, from token: ContributionToken) {
+        // The stored title always updates, but the strip only needs relayout
+        // when the contribution's value actually changed.
+        let changed = titleContribution?.token != token || titleContribution?.title != title
         titleContribution = (token, title)
-        onDidChange?()
+        if changed {
+            onDidChange?()
+        }
     }
 
     func clearTitle(from token: ContributionToken) {
@@ -171,17 +224,15 @@ struct WindowChromeBar: View {
 
     var body: some View {
         let items = chrome?.toolbarItems ?? []
+        // Near-square chrome buttons, sized like the caption buttons the
+        // strip sits next to (a little under the strip height so there's a
+        // few points of breathing room top and bottom).
+        let itemSize = min(stripHeight - 8, 40)
         HStack(alignment: .center, spacing: 4) {
             WindowMenuButton()
             if let backAction = chrome?.backAction {
-                Button {
-                    backAction()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .padding(.horizontal, 4)
-                }
-                .buttonStyle(.borderless)
-                .frame(height: stripHeight - 14)
+                WindowBackButton(action: backAction)
+                    .frame(width: itemSize, height: itemSize)
             }
             if let title = chrome?.title {
                 title
@@ -204,12 +255,15 @@ struct WindowChromeBar: View {
     /// don't produce a ragged strip.
     @ViewBuilder
     private func chromeItems(_ items: [ResolvedToolbarItem]) -> some View {
+        let itemSize = min(stripHeight - 8, 40)
         ForEach(Array(items.enumerated()), id: \.offset) { item in
             switch item.element.kind {
             case .view(let view):
                 view
                     .labelsHidden()
-                    .frame(height: stripHeight - 14)
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 15))
+                    .frame(width: itemSize, height: itemSize)
             case .spacer(.fixed):
                 Spacer().frame(width: 16)
             case .spacer(.flexible):
@@ -262,6 +316,58 @@ struct WindowMenuButton: ElementaryView, View {
                 }
             }
             attach(backend: backend)
+        }
+    }
+}
+
+/// The navigation back button shown in the chrome strip while the
+/// navigation stack can pop. The backend supplies the native widget (styled
+/// after the platform's navigation back affordance); a `nil` widget renders
+/// an empty placeholder.
+struct WindowBackButton: ElementaryView, View {
+    var action: @MainActor () -> Void
+
+    func asWidget<Backend: BaseAppBackend>(backend: Backend) -> Backend.Widget {
+        if let backend = backend as? any BackendFeatures.WindowChrome<
+            Backend.Window, Backend.Widget
+        >,
+            let widget = backend.createNavigationBackButton()
+        {
+            return widget
+        }
+        return backend.createContainer()
+    }
+
+    func computeLayout<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        proposedSize: ProposedViewSize,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) -> ViewLayoutResult {
+        ViewLayoutResult.leafView(
+            size: ViewSize(backend.naturalSize(of: widget))
+        )
+    }
+
+    func commit<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        layout: ViewLayoutResult,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        backend.setSize(of: widget, to: layout.size.vector)
+        if let backend = backend as? any BackendFeatures.WindowChrome<
+            Backend.Window, Backend.Widget
+        > {
+            func update<NewBackend>(backend: NewBackend)
+            where NewBackend: BackendFeatures.WindowChrome<Backend.Window, Backend.Widget> {
+                backend.updateNavigationBackButton(
+                    widget,
+                    action: action,
+                    environment: environment
+                )
+            }
+            update(backend: backend)
         }
     }
 }
@@ -411,6 +517,49 @@ struct WindowChromeTitleAttachment<Content: View>: View {
             backend: backend
         )
         environment.windowChrome?.setTitle(title, from: token)
+    }
+}
+
+/// Publishes a request to hide the navigation back button while the attached
+/// view is displayed, and withdraws it when the view disappears. Applied by
+/// ``View/navigationBarBackButtonHidden(_:)``; since environment values only
+/// propagate down, the page-level request reaches the chrome strip as a
+/// contribution — like ``navigationTitle`` does.
+struct WindowChromeBackHiddenAttachment<Content: View>: View {
+    @Environment(\.windowChrome) private var chrome
+    @State private var token = WindowChromeModel.ContributionToken()
+
+    var content: Content
+    var hidden: Bool
+
+    var body: TupleView1<OnDisappearModifier<Content>> {
+        TupleView1(
+            OnDisappearModifier(body: TupleView1(content)) { [chrome, token] in
+                chrome?.clearBackHidden(from: token)
+            }
+        )
+    }
+
+    init(content: Content, hidden: Bool) {
+        self.content = content
+        self.hidden = hidden
+    }
+
+    public func commit<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        children: any ViewGraphNodeChildren,
+        layout: ViewLayoutResult,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        defaultCommit(
+            widget,
+            children: children,
+            layout: layout,
+            environment: environment,
+            backend: backend
+        )
+        environment.windowChrome?.setBackHidden(hidden, from: token)
     }
 }
 

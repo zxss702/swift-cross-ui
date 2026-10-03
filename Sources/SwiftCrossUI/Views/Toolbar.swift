@@ -109,7 +109,21 @@ public struct ToolbarItemGroup<Content: View>: ToolbarContent {
     }
 
     public var _asToolbarItems: [ResolvedToolbarItem] {
-        [ResolvedToolbarItem(placement: placement, kind: .view(AnyView(content)))]
+        // A group built from multiple views flattens them into separate
+        // items — matching macOS, where each group member is its own toolbar
+        // control (uniform item sizing, independent enabled state). Only
+        // `TupleView` content is decomposed; a single view stays one item.
+        if content is any TupleView {
+            let members = Mirror(reflecting: content).children.compactMap {
+                $0.value as? any View
+            }
+            if members.count > 1 {
+                return members.map {
+                    ResolvedToolbarItem(placement: placement, kind: .view(AnyView($0)))
+                }
+            }
+        }
+        return [ResolvedToolbarItem(placement: placement, kind: .view(AnyView(content)))]
     }
 }
 

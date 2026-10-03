@@ -21,6 +21,12 @@ extension WinUIBackend {
         button.action = action
         button.buttonStyle = environment.resolvedButtonStyle.kind
         button.enabled = environment.isEnabled
+        if !environment.isEnabled {
+            FileHandle.standardError.write(
+                "BTN-DISABLED style=\(environment.resolvedButtonStyle.kind)\n"
+                    .data(using: .utf8)!
+            )
+        }
         switch environment.colorScheme {
             case .light:
                 button.requestedTheme = .light

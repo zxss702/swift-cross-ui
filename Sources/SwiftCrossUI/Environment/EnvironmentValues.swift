@@ -62,6 +62,12 @@ public struct EnvironmentValues {
     /// proposal received by each view must be its intended final proposal.
     var allowLayoutCaching: Bool = false
 
+    /// An internal environment value tracking how deeply nested a view graph
+    /// node is within the graph. ``ViewGraphUpdateScheduler`` uses this to
+    /// process ancestor updates before descendant ones, allowing ancestor
+    /// commits to cover (and thereby skip) queued descendant updates.
+    var viewGraphDepth: Int = 0
+
     /// Backing storage for observable subscript
     private var observableObjects: [ObjectIdentifier: AnyObject]
 

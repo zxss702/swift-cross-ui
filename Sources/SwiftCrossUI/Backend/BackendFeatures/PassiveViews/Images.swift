@@ -82,4 +82,32 @@ extension BackendFeatures {
             environment: EnvironmentValues
         )
     }
+
+    /// Optional backend feature for rendering SVG images natively (e.g.
+    /// WinUI's `SvgImageSource`) instead of rasterising them in the view
+    /// layer. ``Image`` uses this path when its source resolves to a `.svg`
+    /// file URL.
+    @MainActor
+    public protocol SvgImages: Core {
+        /// Creates a widget that displays a vector image.
+        func createSvgImageView() -> Widget
+
+        /// Updates the displayed vector image.
+        ///
+        /// - Parameters:
+        ///   - imageView: The widget returned by ``createSvgImageView()``.
+        ///   - url: The SVG file to display.
+        ///   - rasterWidth: The pixel width the image will be rasterised at
+        ///     (layout size × scale factor). `0` lets the backend choose.
+        ///   - rasterHeight: The pixel height the image will be rasterised
+        ///     at (layout size × scale factor). `0` lets the backend choose.
+        ///   - environment: The current environment.
+        func updateSvgImageView(
+            _ imageView: Widget,
+            url: URL,
+            rasterWidth: Int,
+            rasterHeight: Int,
+            environment: EnvironmentValues
+        )
+    }
 }

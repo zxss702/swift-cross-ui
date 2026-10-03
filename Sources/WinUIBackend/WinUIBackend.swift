@@ -176,20 +176,35 @@ public final class WinUIBackend:
         /// The context-menu flyout attached to each widget (keyed by widget
         /// identity). Rebuilt in-place on each update so that the
         /// `contextRequested` handler always reads the latest items.
-        var contextMenuFlyouts: [ObjectIdentifier: MenuFlyout] = [:]
+        var contextMenuFlyouts: [ObjectIdentifier: WeakKeyed<MenuFlyout>] = [:]
 
         /// The signature of the items currently rendered into each widget's
         /// context-menu flyout, so unchanged menus aren't rebuilt on every
         /// commit (the rebuild walks the WinRT boundary per item).
-        var contextMenuSignatures: [ObjectIdentifier: String] = [:]
+        var contextMenuSignatures: [ObjectIdentifier: WeakKeyed<String>] = [:]
 
         /// The action boxes bound into each widget's rendered context-menu
         /// items, in render order. Updated on every update so that handlers
         /// invoke the latest closures even when the flyout isn't rebuilt.
-        var contextMenuActions: [ObjectIdentifier: [ContextMenuActionBox]] = [:]
+        var contextMenuActions: [ObjectIdentifier: WeakKeyed<[ContextMenuActionBox]>] = [:]
 
-        /// Widgets that already have a `contextRequested` handler attached.
-        var contextMenuHooks: Set<ObjectIdentifier> = []
+        /// Widgets that already have a `rightTapped` context-menu handler
+        /// attached.
+        var contextMenuHooks: [ObjectIdentifier: WeakKeyed<Void>] = [:]
+
+        /// Loaded `SvgImageSource`s keyed by image widget. Entries weakly
+        /// reference the widget so address reuse can't match a stale source.
+        var svgImageSources: [ObjectIdentifier: WeakSvgSource] = [:]
+
+        /// The signature of the items currently rendered into each
+        /// `Menu`-backed flyout, so unchanged menus aren't rebuilt on every
+        /// commit (the rebuild walks the WinRT boundary per item).
+        var popoverMenuSignatures: [ObjectIdentifier: WeakKeyed<String>] = [:]
+
+        /// The action boxes bound into each `Menu`-backed flyout's items, in
+        /// render order. Updated on every update so that handlers invoke the
+        /// latest closures even when the flyout isn't rebuilt.
+        var popoverMenuActions: [ObjectIdentifier: WeakKeyed<[ContextMenuActionBox]>] = [:]
 
         /// Memoized results of `size(of:whenDisplayedIn:...)` text
         /// measurements. Text measurement requires a real XAML `measure` call,
@@ -202,7 +217,19 @@ public final class WinUIBackend:
         /// `EnvironmentValues.apply(to:cachingIn:)`. Every property read in
         /// `apply` is a COM call (~10µs each), so skipping the whole update
         /// when the applied values are unchanged is worthwhile.
-        var appliedTextBlockSignatures: [ObjectIdentifier: Int] = [:]
+        var appliedTextBlockSignatures: [ObjectIdentifier: WeakKeyed<Int>] = [:]
+    }
+
+    /// A cache entry bound to the lifetime of a specific object. Keys are
+    /// `ObjectIdentifier`s, which wrap a heap address that the allocator
+    /// reuses for new objects once the old one is freed — a recycled address
+    /// would otherwise match entries left behind by a dead object (e.g.
+    /// skipping a fresh `TextBlock`'s font application or reusing a dead
+    /// widget's flyout). The weak reference goes `nil` when its object dies,
+    /// so stale entries always miss the ownership check.
+    struct WeakKeyed<Value> {
+        weak var object: AnyObject?
+        var value: Value
     }
 
     struct TextMeasurementKey: Hashable {
@@ -598,22 +625,39 @@ public final class WinUIBackend:
             guard let self, let window, !window.isClosed,
                 let desired = window.desiredClientSize
             else { return }
-            let current = self.size(ofWindow: window)
-            guard abs(current.x - desired.x) > 1 || abs(current.y - desired.y) > 1
+            // `appWindow.clientSize` reports the *requested* size, not what
+            // the HWND actually received — when `resizeClient` is silently
+            // dropped it reads as if the resize succeeded anyway. The real
+            // client rect is the source of truth: a window stuck smaller
+            // renders its content outside its input area (visible but
+            // unclickable), so this must be caught and retried.
+            guard let realPixels = self.realClientSizePixels(of: window) else {
+                return
+            }
+            let scale = window.scaleFactor
+            let desiredPixels = SIMD2(
+                Int((Double(desired.x) * scale).rounded(.towardZero)),
+                Int((Double(desired.y + window.contentHeightAdjustment) * scale)
+                    .rounded(.towardZero))
+            )
+            guard abs(realPixels.x - desiredPixels.x) > 2
+                || abs(realPixels.y - desiredPixels.y) > 2
             else { return }
-            // `resizeClient` applies asynchronously, so a check can read the
-            // pre-resize size. Only conclude that AppWindow is clamping the
-            // request (e.g. to the work area) after several consecutive
-            // unchanged readings — otherwise we'd accept a wrong size and
-            // give up while the real resize was still in flight.
-            let stagnant = current == window.lastVerifiedClientSize
+            // Only conclude that AppWindow is clamping the request (e.g. to
+            // the work area) after several consecutive unchanged readings —
+            // otherwise we'd accept a wrong size while a resize was still in
+            // flight.
+            let stagnant = realPixels == window.lastVerifiedClientSize
                 ? stagnantChecks + 1
                 : 0
             if stagnant >= 3 {
-                window.desiredClientSize = current
+                // `resizeClient` keeps reporting success without resizing the
+                // HWND — push the size onto the HWND directly. The min/max
+                // subclass clamps this to the permitted range automatically.
+                self.applyClientSizeDirectly(to: window, desired: desired)
                 return
             }
-            window.lastVerifiedClientSize = current
+            window.lastVerifiedClientSize = realPixels
             self.setSize(ofWindow: window, to: desired)
             self.verifyClientSize(
                 of: window,
@@ -621,6 +665,52 @@ public final class WinUIBackend:
                 stagnantChecks: stagnant
             )
         }
+    }
+
+    /// The window's real client size in physical pixels, measured on the
+    /// HWND itself — unlike `appWindow.clientSize`, which can report a
+    /// requested-but-unapplied size.
+    private func realClientSizePixels(of window: CustomWindow) -> SIMD2<Int>? {
+        guard let hwnd = window.getHWND() else { return nil }
+        var rect = RECT()
+        guard GetClientRect(hwnd, &rect) else { return nil }
+        return SIMD2(Int(rect.right), Int(rect.bottom))
+    }
+
+    /// Resizes the window's HWND directly so its client area matches
+    /// `desired` DIPs at the current scale factor. Used when AppWindow's
+    /// `resizeClient` reports success but never resizes the HWND (its
+    /// `clientSize` then echoes the request, hiding the failure).
+    private func applyClientSizeDirectly(
+        to window: CustomWindow,
+        desired: SIMD2<Int>
+    ) {
+        guard let hwnd = window.getHWND() else { return }
+        let scale = window.scaleFactor
+        var windowRect = RECT()
+        var clientRect = RECT()
+        GetWindowRect(hwnd, &windowRect)
+        GetClientRect(hwnd, &clientRect)
+        let frameWidth =
+            (windowRect.right - windowRect.left)
+            - (clientRect.right - clientRect.left)
+        let frameHeight =
+            (windowRect.bottom - windowRect.top)
+            - (clientRect.bottom - clientRect.top)
+        let width =
+            Int((Double(desired.x) * scale).rounded(.awayFromZero)) + Int(frameWidth)
+        let height =
+            Int((Double(desired.y + window.contentHeightAdjustment) * scale)
+                .rounded(.awayFromZero)) + Int(frameHeight)
+        SetWindowPos(
+            hwnd,
+            nil,
+            0,
+            0,
+            Int32(width),
+            Int32(height),
+            UINT(SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
+        )
     }
 
     func applyPendingClientSize(of window: CustomWindow) {
@@ -917,7 +1007,7 @@ public final class WinUIBackend:
         // TODO: Notify when window scale factor changes
 
         // NB: This event fires when the window is activated _or_ deactivated.
-        window.activated.addHandler { _, args in
+        window.activated.addHandler { _, _ in
             if let rootHandler = self.rootEnvironmentChangeHandler {
                 // Defer the refresh to the next dispatcher turn: `activated`
                 // fires synchronously inside `activate()` (i.e. mid-window-
@@ -1418,11 +1508,27 @@ public final class WinUIBackend:
         content: ResolvedMenu,
         environment: EnvironmentValues
     ) {
-        menu.items.clear()
-        var actionBoxes: [ContextMenuActionBox] = []
-        for item in content.items {
-            menu.items.append(
-                renderMenuItem(item, environment: environment, actionBoxes: &actionBoxes))
+        let id = ObjectIdentifier(menu)
+        let signature = content.items.map {
+            contextMenuItemSignature($0, environment: environment)
+        }.joined(separator: "|")
+
+        let sigEntry = internalState.popoverMenuSignatures[id]
+        if sigEntry?.object !== menu || sigEntry?.value != signature {
+            internalState.popoverMenuSignatures[id] =
+                WeakKeyed(object: menu, value: signature)
+            var actionBoxes: [ContextMenuActionBox] = []
+            menu.items.clear()
+            for item in content.items {
+                menu.items.append(
+                    renderMenuItem(item, environment: environment, actionBoxes: &actionBoxes))
+            }
+            internalState.popoverMenuActions[id] = WeakKeyed(object: menu, value: actionBoxes)
+        } else if let actionBoxes = internalState.popoverMenuActions[id],
+            actionBoxes.object === menu
+        {
+            var index = 0
+            refreshMenuItemActions(content.items, boxes: actionBoxes.value, index: &index)
         }
     }
 
@@ -1447,11 +1553,14 @@ public final class WinUIBackend:
             contextMenuItemSignature($0, environment: environment)
         }.joined(separator: "|")
 
-        let flyout = internalState.contextMenuFlyouts[id] ?? MenuFlyout()
-        internalState.contextMenuFlyouts[id] = flyout
+        let flyoutEntry = internalState.contextMenuFlyouts[id]
+        let flyout = (flyoutEntry?.object === widget ? flyoutEntry?.value : nil) ?? MenuFlyout()
+        internalState.contextMenuFlyouts[id] = WeakKeyed(object: widget, value: flyout)
 
-        if internalState.contextMenuSignatures[id] != signature {
-            internalState.contextMenuSignatures[id] = signature
+        let sigEntry = internalState.contextMenuSignatures[id]
+        if sigEntry?.object !== widget || sigEntry?.value != signature {
+            internalState.contextMenuSignatures[id] =
+                WeakKeyed(object: widget, value: signature)
             var actionBoxes: [ContextMenuActionBox] = []
             flyout.items.clear()
             for item in items.items {
@@ -1459,10 +1568,13 @@ public final class WinUIBackend:
                     renderMenuItem(item, environment: environment, actionBoxes: &actionBoxes)
                 )
             }
-            internalState.contextMenuActions[id] = actionBoxes
-        } else if let actionBoxes = internalState.contextMenuActions[id] {
+            internalState.contextMenuActions[id] =
+                WeakKeyed(object: widget, value: actionBoxes)
+        } else if let actionBoxes = internalState.contextMenuActions[id],
+            actionBoxes.object === widget
+        {
             var index = 0
-            refreshMenuItemActions(items.items, boxes: actionBoxes, index: &index)
+            refreshMenuItemActions(items.items, boxes: actionBoxes.value, index: &index)
         }
 
         // `UIElement.contextFlyout` doesn't reliably auto-show in XAML
@@ -1471,18 +1583,20 @@ public final class WinUIBackend:
         // deepest element up, so the innermost context-menu'd view wins; its
         // handler marks the event handled which prevents ancestors from
         // re-showing their own menus.
-        if internalState.contextMenuHooks.insert(id).inserted {
+        if internalState.contextMenuHooks[id]?.object !== widget {
+            internalState.contextMenuHooks[id] = WeakKeyed(object: widget, value: ())
             widget.rightTapped.addHandler { [weak internalState, weak widget] _, args in
                 guard
                     let internalState,
                     let widget,
                     let menu = internalState.contextMenuFlyouts[ObjectIdentifier(widget)],
+                    menu.object === widget,
                     let args,
                     !args.handled,
                     let position = try? args.getPosition(widget)
                 else { return }
 
-                try? menu.showAt(widget, position)
+                try? menu.value.showAt(widget, position)
                 args.handled = true
             }
         }
@@ -2012,6 +2126,12 @@ public final class WinUIBackend:
         splitView.displayMode = .inline
         // Match the AppKit backend's defaultLeadingWidth of 200.
         splitView.openPaneLength = 200
+        // The default pane brush is `SystemControlBackgroundChromeMediumLow`,
+        // which reads as a mismatched grey when the content side paints the
+        // app's own background. Let the window background show through so
+        // the pane and content share one colour family.
+        splitView.paneBackground = WinUI.SolidColorBrush(
+            UWP.Color(a: 0, r: 0, g: 0, b: 0))
         return splitView
     }
 
@@ -2019,10 +2139,6 @@ public final class WinUIBackend:
         ofSplitView splitView: Widget,
         to action: @escaping () -> Void
     ) {
-        // WinUI's SplitView currently doesn't support resizing, but we still
-        // store the sidebar resize handler because we programmatically resize
-        // the sidebar and call the handler whenever the minimum sidebar width
-        // changes.
         let splitView = splitView as! CustomSplitView
         splitView.sidebarResizeHandler = action
     }
@@ -2038,6 +2154,8 @@ public final class WinUIBackend:
         maximum maximumWidth: Int
     ) {
         let splitView = splitView as! CustomSplitView
+        splitView.sidebarMinimumLength = Double(max(minimumWidth, 0))
+        splitView.sidebarMaximumLength = Double(max(maximumWidth, minimumWidth))
         // A closed pane has no width to clamp — and clamping `openPaneLength`
         // back to a nonzero minimum would fight `setSidebarWidth(0)` in an
         // update loop (each mutation fires `sidebarResizeHandler` which
@@ -2049,8 +2167,8 @@ public final class WinUIBackend:
         // backends' semantics where setting bounds only constrains the pane
         // rather than resizing it, by clamping the current width into range.
         let newWidth = min(
-            max(splitView.openPaneLength, Double(max(minimumWidth, 0))),
-            Double(max(maximumWidth, minimumWidth))
+            max(splitView.openPaneLength, splitView.sidebarMinimumLength),
+            splitView.sidebarMaximumLength
         )
         if newWidth != splitView.openPaneLength {
             splitView.openPaneLength = newWidth
@@ -2873,13 +2991,16 @@ extension EnvironmentValues {
         if control.isEnabled != isEnabled {
             control.isEnabled = isEnabled
         }
-        if resolvedFont.isItalic, control.fontStyle != .italic {
-            control.fontStyle = .italic
+        let fontStyle: UWP.FontStyle = resolvedFont.isItalic ? .italic : .normal
+        if control.fontStyle != fontStyle {
+            control.fontStyle = fontStyle
         }
-        if case .named(let family) = resolvedFont.identifier.kind,
-            control.fontFamily?.source != family
-        {
-            control.fontFamily = WinUI.FontFamily(family)
+        if case .named(let family) = resolvedFont.identifier.kind {
+            if control.fontFamily?.source != family {
+                control.fontFamily = WinUI.FontFamily(family)
+            }
+        } else if control.fontFamily != nil {
+            _ = try? control.clearValue(WinUI.Control.fontFamilyProperty)
         }
         let theme: WinUI.ElementTheme =
             switch colorScheme {
@@ -2915,10 +3036,13 @@ extension EnvironmentValues {
             hasher.combine(foregroundColor.a)
             let signature = hasher.finalize()
             let id = ObjectIdentifier(textBlock)
-            if internalState.appliedTextBlockSignatures[id] == signature {
+            if let entry = internalState.appliedTextBlockSignatures[id],
+                entry.object === textBlock, entry.value == signature
+            {
                 return
             }
-            internalState.appliedTextBlockSignatures[id] = signature
+            internalState.appliedTextBlockSignatures[id] =
+                WinUIBackend.WeakKeyed(object: textBlock, value: signature)
         }
         // Guard every write: this runs per Text view per layout pass, and
         // XAML invalidates on writes even when the value is unchanged.
@@ -2936,15 +3060,19 @@ extension EnvironmentValues {
             textBlock.lineHeight = resolvedFont.lineHeight
         }
 
-        if resolvedFont.isItalic {
-            if textBlock.fontStyle != .italic {
-                textBlock.fontStyle = .italic
-            }
+        let fontStyle: UWP.FontStyle = resolvedFont.isItalic ? .italic : .normal
+        if textBlock.fontStyle != fontStyle {
+            textBlock.fontStyle = fontStyle
         }
-        if case .named(let family) = resolvedFont.identifier.kind,
-            textBlock.fontFamily?.source != family
-        {
-            textBlock.fontFamily = WinUI.FontFamily(family)
+        // A `.system` font keeps the default family: clearing an explicitly
+        // set family restores it (the family persists if only assigned when
+        // the resolved font is named).
+        if case .named(let family) = resolvedFont.identifier.kind {
+            if textBlock.fontFamily?.source != family {
+                textBlock.fontFamily = WinUI.FontFamily(family)
+            }
+        } else if textBlock.fontFamily != nil {
+            _ = try? textBlock.clearValue(WinUI.TextBlock.fontFamilyProperty)
         }
     }
 }
@@ -2986,6 +3114,71 @@ final class CustomRadioButtons: RadioButtons {
 
 final class CustomSplitView: SplitView {
     var sidebarResizeHandler: (() -> Void)?
+    /// The bounds most recently applied by `setSidebarWidthBounds`, mirrored
+    /// here so the divider drag clamps to the same range.
+    var sidebarMinimumLength = 0.0
+    var sidebarMaximumLength = Double.infinity
+    private var dividerDragStart: (x: Double, length: Double)?
+    private lazy var resizeCursor = WinAppSDK.InputSystemCursor.create(.sizeWestEast)
+
+    /// Half the width of the divider's hit zone, in DIPs.
+    private static let dividerHitHalfWidth = 6.0
+
+    private func dividerX() -> Double {
+        panePlacement == .right
+            ? actualWidth - openPaneLength
+            : openPaneLength
+    }
+
+    private func isOverDivider(_ e: PointerRoutedEventArgs?) -> Bool {
+        guard isPaneOpen,
+            let point = try? e?.getCurrentPoint(self)
+        else { return false }
+        return abs(Double(point.position.x) - dividerX()) <= Self.dividerHitHalfWidth
+    }
+
+    override func onPointerPressed(_ e: PointerRoutedEventArgs!) throws {
+        if isOverDivider(e), let point = try? e.getCurrentPoint(self) {
+            dividerDragStart = (Double(point.position.x), openPaneLength)
+            _ = try? capturePointer(e.pointer)
+            e.handled = true
+            return
+        }
+        try super.onPointerPressed(e)
+    }
+
+    override func onPointerMoved(_ e: PointerRoutedEventArgs!) throws {
+        if let drag = dividerDragStart,
+            let point = try? e.getCurrentPoint(self)
+        {
+            let direction = panePlacement == .right ? -1.0 : 1.0
+            let newLength = min(
+                max(
+                    drag.length + direction * (Double(point.position.x) - drag.x),
+                    sidebarMinimumLength
+                ),
+                sidebarMaximumLength
+            )
+            if newLength != openPaneLength {
+                openPaneLength = newLength
+                sidebarResizeHandler?()
+            }
+            e.handled = true
+            return
+        }
+        protectedCursor = isOverDivider(e) ? resizeCursor : nil
+        try super.onPointerMoved(e)
+    }
+
+    override func onPointerReleased(_ e: PointerRoutedEventArgs!) throws {
+        dividerDragStart = nil
+        try super.onPointerReleased(e)
+    }
+
+    override func onPointerCaptureLost(_ e: PointerRoutedEventArgs!) throws {
+        dividerDragStart = nil
+        try super.onPointerCaptureLost(e)
+    }
 }
 
 final class TapGestureTarget: WinUI.Canvas {

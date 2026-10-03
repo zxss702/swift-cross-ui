@@ -46,7 +46,7 @@ import Foundation
 /// layout algorithm.
 ///
 /// The new layout system behaviour is in line with SwiftUI's layout behaviour.
-public struct Text: Sendable {
+public struct Text: Sendable, Equatable {
     /// The string to be shown in the text view.
     public private(set) var string: String
 

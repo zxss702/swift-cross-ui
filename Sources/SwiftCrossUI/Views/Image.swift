@@ -446,6 +446,46 @@ extension Image {
             }
         }
     }
+
+    /// Reads an SVG's intrinsic size from its root element: `width`/`height`
+    /// attributes if present and non-relative, otherwise the `viewBox`
+    /// dimensions. Only the header is scanned since the root element opens
+    /// the document.
+    private static func svgIntrinsicSize(of url: URL) -> ViewSize? {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+            return nil
+        }
+        let head = String(decoding: data.prefix(16_384), as: UTF8.self)
+
+        func dimension(_ attr: String) -> Double? {
+            guard
+                let r = head.range(of: attr + "=\""),
+                let end = head[r.upperBound...].firstIndex(of: "\"")
+            else { return nil }
+            let raw = head[r.upperBound..<end]
+            // Percentage/other relative lengths carry no intrinsic size.
+            if raw.contains("%") { return nil }
+            let value = raw.replacingOccurrences(of: "px", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            return Double(value)
+        }
+
+        if let w = dimension("width"), let h = dimension("height"), w > 0, h > 0 {
+            return ViewSize(w, h)
+        }
+        if
+            let r = head.range(of: "viewBox=\""),
+            let end = head[r.upperBound...].firstIndex(of: "\"")
+        {
+            let parts = head[r.upperBound..<end]
+                .split { $0 == " " || $0 == "," }
+                .compactMap { Double($0) }
+            if parts.count == 4, parts[2] > 0, parts[3] > 0 {
+                return ViewSize(parts[2], parts[3])
+            }
+        }
+        return nil
+    }
 }
 
 extension Image: View {
@@ -469,6 +509,9 @@ extension Image: TypeSafeView {
         if case .symbolGlyph = source {
             children.symbolWidget = Self.makeSymbolWidget(backend: backend)
         }
+        if isSvgSource {
+            children.svgWidget = Self.makeSvgWidget(backend: backend)
+        }
         return children
     }
 
@@ -485,6 +528,30 @@ extension Image: TypeSafeView {
             _ backend: NewBackend
         ) -> AnyWidget {
             AnyWidget(backend.createSymbolView())
+        }
+        return make(casted)
+    }
+
+    /// Whether the source is an SVG file that a ``BackendFeatures/SvgImages``
+    /// backend can render natively.
+    private var isSvgSource: Bool {
+        guard case .url(let url, _) = source else { return false }
+        return url.pathExtension.lowercased() == "svg"
+    }
+
+    /// Creates the native vector-image widget for SVG sources when the
+    /// backend supports ``BackendFeatures/SvgImages``.
+    @MainActor
+    private static func makeSvgWidget<Backend: BaseAppBackend>(
+        backend: Backend
+    ) -> AnyWidget? {
+        guard
+            let casted = backend as? any BaseAppBackend & BackendFeatures.SvgImages
+        else { return nil }
+        func make<NewBackend: BaseAppBackend & BackendFeatures.SvgImages>(
+            _ backend: NewBackend
+        ) -> AnyWidget {
+            AnyWidget(backend.createSvgImageView())
         }
         return make(casted)
     }
@@ -507,7 +574,13 @@ extension Image: TypeSafeView {
         if source != children.cachedImageSource {
             switch source {
                 case .url(let url, let useFileExtension):
-                    if let decoded = Image.decodePixels(
+                    if isSvgSource, children.svgWidget != nil {
+                        // Native vector rendering — no pixels to decode, but
+                        // layout still needs an intrinsic size, so read it
+                        // from the SVG header once per source.
+                        image = nil
+                        children.cachedSvgIntrinsicSize = Self.svgIntrinsicSize(of: url)
+                    } else if let decoded = Image.decodePixels(
                         from: url,
                         useFileExtension: useFileExtension
                     ) {
@@ -577,6 +650,13 @@ extension Image: TypeSafeView {
             } else {
                 size = idealSize
             }
+        } else if isSvgSource, children.svgWidget != nil {
+            let intrinsic = children.cachedSvgIntrinsicSize ?? ViewSize(16, 16)
+            if isResizable {
+                size = proposedSize.replacingUnspecifiedDimensions(by: intrinsic)
+            } else {
+                size = intrinsic
+            }
         } else {
             size = .zero
         }
@@ -628,6 +708,38 @@ extension Image: TypeSafeView {
                 in: children.container.into(),
                 to: (size &- naturalSize) / 2
             )
+            return
+        }
+
+        if case .url(let url, _) = source, isSvgSource, let svgWidget = children.svgWidget {
+            // Native vector path: the backend renders the SVG at the laid-out
+            // size; rasterisation density follows the window scale factor.
+            if let casted = backend as? any BaseAppBackend & BackendFeatures.SvgImages {
+                func update<NewBackend: BaseAppBackend & BackendFeatures.SvgImages>(
+                    _ backend: NewBackend
+                ) {
+                    backend.updateSvgImageView(
+                        svgWidget.into(),
+                        url: url,
+                        rasterWidth: max(
+                            0,
+                            Int((Double(size.x) * environment.windowScaleFactor)
+                                .rounded(.awayFromZero))
+                        ),
+                        rasterHeight: max(
+                            0,
+                            Int((Double(size.y) * environment.windowScaleFactor)
+                                .rounded(.awayFromZero))
+                        ),
+                        environment: environment
+                    )
+                }
+                update(casted)
+            }
+            setDisplayedWidget(svgWidget, children: children, backend: backend)
+            backend.setSize(of: children.container.into(), to: size)
+            backend.setSize(of: svgWidget.into(), to: size)
+            backend.setPosition(ofChildAt: 0, in: children.container.into(), to: .zero)
             return
         }
 
@@ -683,6 +795,9 @@ extension Image: TypeSafeView {
 @_spi(Backends) public class ImageChildren: ViewGraphNodeChildren {
     var cachedImageSource: Image.Source? = nil
     var cachedImage: ImageFormats.Image<RGBA>? = nil
+    /// The intrinsic size parsed from the current SVG source's header, when
+    /// ``svgWidget`` is in use.
+    var cachedSvgIntrinsicSize: ViewSize? = nil
     var cachedImageDisplaySize: SIMD2<Int> = .zero
     var container: AnyWidget
     public var imageWidget: AnyWidget
@@ -690,6 +805,9 @@ extension Image: TypeSafeView {
     /// ``Image/Source/symbolGlyph`` and the backend supports
     /// ``BackendFeatures/SymbolViews``.
     var symbolWidget: AnyWidget?
+    /// The native vector-image widget used when the image source is an SVG
+    /// file and the backend supports ``BackendFeatures/SvgImages``.
+    var svgWidget: AnyWidget?
     /// The widget currently hosted inside ``container``.
     var insertedWidget: AnyWidget?
     var imageChanged = false
@@ -729,7 +847,7 @@ extension Image: TypeSafeView {
             "arrow.clockwise.circle": 0xE895, // Sync
             "arrow.down.circle": 0xE896, // Download
             "arrow.down.to.line": 0xE896, // Download
-            "arrow.left.arrow.right": 0xE880, // StatusDataTransfer
+            "arrow.left.arrow.right": 0xE8AB, // Switch
             "arrow.triangle.2.circlepath": 0xE895, // Sync
             "arrow.triangle.branch": 0xEF90, // Flow
             "arrow.trianglehead.pull": 0xEBD3, // CloudDownload
@@ -831,7 +949,7 @@ extension Image: TypeSafeView {
             "server.rack": 0xE965, // MediaStorageTower
             "sidebar.left": 0xE90C, // DockLeft
             "sidebar.right": 0xE90D, // DockRight
-            "sparkles.2": 0xE735, // FavoriteStarFill
+            "sparkles.2": 0xEAB7, // ChatSparkle
             "square": 0xE739, // Checkbox
             "square.and.arrow.down": 0xE896, // Download
             "stop.circle": 0xF2D9, // CirclePause

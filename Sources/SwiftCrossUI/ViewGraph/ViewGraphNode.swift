@@ -63,10 +63,14 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
     /// Used by the ``ModelObserver`` protocol to prevent duplicate view updates.
     var currentViewModelObservationID: UUID?
 
-    /// The ``ViewGraphUpdateScheduler`` generation this node was last committed
-    /// in. Used to skip queued updates for nodes whose subtree was already
-    /// committed by an ancestor's update in the same flush.
-    var commitGeneration: UInt64 = 0
+    /// The ``ViewGraphUpdateScheduler`` generation this node's layout was last
+    /// computed in. Used to skip queued updates for nodes already laid out by
+    /// an ancestor's update in the same flush.
+    var updateGeneration: UInt64 = 0
+
+    /// The node's approximate depth in the view graph (root = 1). Used by
+    /// ``ViewGraphUpdateScheduler`` to flush ancestors before descendants.
+    var graphDepth = 0
 
     /// Creates a node for a given view while also creating the nodes for its children, creating
     /// the view's widget, and starting to observe its state for changes.
@@ -168,9 +172,10 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
     private func bottomUpUpdate() {
         ViewGraphUpdateScheduler.enqueue(
             self,
+            depth: graphDepth,
             isCovered: { [weak self] in
                 guard let self else { return true }
-                return self.commitGeneration == ViewGraphUpdateScheduler.generation
+                return self.updateGeneration == ViewGraphUpdateScheduler.generation
             },
             run: { [weak self] in
                 self?.runBottomUpUpdate()
@@ -203,10 +208,13 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
     }
 
     private func updateEnvironment(_ environment: EnvironmentValues) -> EnvironmentValues {
-        environment.with(\.onResize) { [weak self] _ in
-            guard let self else { return }
-            self.bottomUpUpdate()
-        }
+        graphDepth = environment.viewGraphDepth + 1
+        return environment
+            .with(\.onResize) { [weak self] _ in
+                guard let self else { return }
+                self.bottomUpUpdate()
+            }
+            .with(\.viewGraphDepth, graphDepth)
     }
 
     /// Recomputes the view's body and computes its layout and the layout of
@@ -242,6 +250,8 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
             backend.show(widget: widget)
             hasHadFirstUpdate = true
         }
+
+        updateGeneration = ViewGraphUpdateScheduler.generation
 
         if proposedSize == lastProposedSize && !resultCache.isEmpty
             && (!parentEnvironment.allowLayoutCaching || environment.allowLayoutCaching),
@@ -363,10 +373,7 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
         )
 
         if parentEnvironment.allowLayoutCaching {
-            logger.warning(
-                "committing layout computed with caching enabled; results may be invalid",
-                metadata: ["NodeView": "\(NodeView.self)"]
-            )
+            logger.warning("committing layout computed with caching enabled")
         }
         if currentLayout.size.height == .infinity || currentLayout.size.width == .infinity {
             logger.warning(
@@ -378,8 +385,6 @@ public class ViewGraphNode<NodeView: View, Backend: BaseAppBackend>: ModelObserv
                 ]
             )
         }
-
-        commitGeneration = ViewGraphUpdateScheduler.generation
 
         view.commit(
             widget,

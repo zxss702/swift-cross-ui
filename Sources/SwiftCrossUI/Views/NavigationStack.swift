@@ -1,7 +1,162 @@
 import Foundation
+
+extension BackendFeatures {
+    /// Backend hook for containers that animate direct-child insertions and
+    /// removals with the platform's standard content transition.
+    /// ``NavigationStack`` hosts its visible page in one so that pushes and
+    /// pops animate natively; a `nil` container falls back to a plain one
+    /// (no transition).
+    @MainActor
+    public protocol TransitionContainers<Widget>: Core {
+        /// Creates a container that plays the platform's entrance transition
+        /// when a child is inserted, and the corresponding removal
+        /// transition when a child is removed.
+        func createTransitionContainer() -> Widget?
+    }
+}
+
 /// Type to indicate the root of the NavigationStack. This is internal to prevent root accidentally showing instead
 /// of a detail view.
 struct NavigationStackRootPath: Codable {}
+
+/// A type-erased host for the page currently displayed by a
+/// ``NavigationStack``. Behaves like ``AnyView`` — recreating the child node
+/// when the page's concrete type changes — but hosts the child widget in the
+/// backend's transition container so that page swaps animate with the
+/// platform's standard navigation transition. The host itself stays stable
+/// across pushes and pops.
+struct NavigationTransitionHost: TypeSafeView {
+    typealias Children = NavigationTransitionHostChildren
+
+    /// The page to display.
+    var child: any View
+
+    var body: some View { EmptyView() }
+
+    func children<Backend: BaseAppBackend>(
+        backend: Backend,
+        snapshots: [ViewGraphSnapshotter.NodeSnapshot]?,
+        environment: EnvironmentValues
+    ) -> NavigationTransitionHostChildren {
+        NavigationTransitionHostChildren(
+            from: self,
+            backend: backend,
+            snapshot: snapshots?.count == 1 ? snapshots?.first : nil,
+            environment: environment
+        )
+    }
+
+    func layoutableChildren<Backend: BaseAppBackend>(
+        backend: Backend,
+        children: NavigationTransitionHostChildren
+    ) -> [LayoutSystem.LayoutableChild] {
+        []
+    }
+
+    func asWidget<Backend: BaseAppBackend>(
+        _ children: NavigationTransitionHostChildren,
+        backend: Backend
+    ) -> Backend.Widget {
+        let container: Backend.Widget
+        if let backend = backend as? any BackendFeatures.TransitionContainers<
+            Backend.Widget
+        >,
+            let widget = backend.createTransitionContainer()
+        {
+            container = widget
+        } else {
+            container = backend.createContainer()
+        }
+        backend.insert(children.node.getWidget().into(), into: container, at: 0)
+        backend.setPosition(ofChildAt: 0, in: container, to: .zero)
+        return container
+    }
+
+    /// Attempts to update the child. A view-type mismatch means a different
+    /// page is being displayed, so the child node is recreated and its new
+    /// widget reinserted — which the transition container animates.
+    func computeLayout<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        children: NavigationTransitionHostChildren,
+        proposedSize: ProposedViewSize,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) -> ViewLayoutResult {
+        var (viewTypesMatched, result) = children.node.computeLayoutWithNewView(
+            child,
+            proposedSize,
+            environment
+        )
+
+        if !viewTypesMatched {
+            children.widgetNeedsReinsertion = true
+            children.node = ErasedViewGraphNode(
+                for: child,
+                backend: backend,
+                environment: environment
+            )
+            let (_, newResult) = children.node.computeLayoutWithNewView(
+                child,
+                proposedSize,
+                environment
+            )
+            result = newResult
+        }
+
+        return result
+    }
+
+    func commit<Backend: BaseAppBackend>(
+        _ widget: Backend.Widget,
+        children: NavigationTransitionHostChildren,
+        layout: ViewLayoutResult,
+        environment: EnvironmentValues,
+        backend: Backend
+    ) {
+        if children.widgetNeedsReinsertion {
+            backend.remove(childAt: 0, from: widget)
+            backend.insert(children.node.getWidget().into(), into: widget, at: 0)
+            backend.setPosition(ofChildAt: 0, in: widget, to: .zero)
+            children.widgetNeedsReinsertion = false
+        }
+
+        _ = children.node.commit()
+
+        backend.setSize(of: widget, to: layout.size.vector)
+    }
+}
+
+/// The child storage of ``NavigationTransitionHost`` — identical in shape to
+/// ``AnyViewChildren``, which can't be reused directly because its
+/// initializer takes ``AnyView``.
+class NavigationTransitionHostChildren: ViewGraphNodeChildren {
+    /// The erased underlying node.
+    var node: ErasedViewGraphNode
+    /// Stores whether or not the displayed view changed during computeLayout.
+    var widgetNeedsReinsertion = false
+
+    var widgets: [AnyWidget] {
+        [node.getWidget()]
+    }
+
+    var erasedNodes: [ErasedViewGraphNode] {
+        [node]
+    }
+
+    init<Backend: BaseAppBackend>(
+        from view: NavigationTransitionHost,
+        backend: Backend,
+        snapshot: ViewGraphSnapshotter.NodeSnapshot?,
+        environment: EnvironmentValues
+    ) {
+        node = ErasedViewGraphNode(
+            for: view.child,
+            backend: backend,
+            snapshot: snapshot,
+            environment: environment
+        )
+    }
+}
 
 /// A view that displays a root view and enables you to present additional views
 /// over the root view.
@@ -14,25 +169,25 @@ public struct NavigationStack<Detail: View>: View {
     @State private var unmanagedPath = NavigationPath()
 
     public var body: some View {
-        let inner: AnyView
+        let inner: NavigationTransitionHost
         if let element = elements.last {
             if let entry = element as? NavigationViewLinkEntry,
                 let view = destinations.viewDestinations[entry.id]
             {
-                inner = view()
+                inner = NavigationTransitionHost(child: view())
             } else if let content = child(element) {
-                inner = AnyView(content)
+                inner = NavigationTransitionHost(child: content)
             } else if let resolver = destinations.resolvers[ObjectIdentifier(type(of: element))],
                 let content = resolver(element)
             {
-                inner = content
+                inner = NavigationTransitionHost(child: content)
             } else {
                 fatalError(
                     "Failed to find detail view for \"\(element)\", make sure you have called .navigationDestination for this type."
                 )
             }
         } else {
-            inner = AnyView(Text("Empty navigation path"))
+            inner = NavigationTransitionHost(child: Text("Empty navigation path"))
         }
         let content = EnvironmentModifier(inner) { environment in
             environment.with(\.navigationPath, path)

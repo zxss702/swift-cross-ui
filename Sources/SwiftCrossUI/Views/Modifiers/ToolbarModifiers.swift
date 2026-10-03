@@ -73,10 +73,17 @@ extension View {
         environment(\.toolbarVisibility, visibility)
     }
 
-    /// Hides the navigation bar's back button.
+    /// Hides the navigation bar's back button while this view is displayed.
     ///
-    /// Recorded in the environment for backends with navigation bars.
+    /// Environment values only propagate down, so the request can't reach an
+    /// enclosing navigation stack directly. Instead the modifier wraps the
+    /// view in a ``WindowChromeBackHiddenAttachment`` that publishes the
+    /// request into the window chrome — the same channel ``navigationTitle``
+    /// uses. The environment value is still written for nested readers.
     public func navigationBarBackButtonHidden(_ hidden: Bool = true) -> some View {
-        environment(\.navigationBarBackButtonHidden, hidden)
+        WindowChromeBackHiddenAttachment(
+            content: environment(\.navigationBarBackButtonHidden, hidden),
+            hidden: hidden
+        )
     }
 }
